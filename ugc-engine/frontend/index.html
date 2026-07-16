@@ -1,0 +1,685 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UGC Outreach Engine — Command Center</title>
+<meta name="description" content="Fully automated UGC creator outreach engine with AI negotiation — real-time dashboard for multi-brand campaign management.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Toast container -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <div class="app">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-icon">⚡</div>
+        <div class="brand-text">
+          <span class="brand-title">UGC Engine</span>
+          <span class="brand-sub">Command Center</span>
+        </div>
+      </div>
+
+      <nav class="nav">
+        <button class="nav-item active" data-section="overview" id="nav-overview">
+          <span class="nav-icon">◈</span> Overview
+        </button>
+        <button class="nav-item" data-section="upload" id="nav-upload">
+          <span class="nav-icon">⬆️</span> Upload Data
+        </button>
+        <button class="nav-item" data-section="scrape" id="nav-scrape">
+          <span class="nav-icon">📸</span> Instagram Scraper
+        </button>
+        <button class="nav-item" data-section="analyzer" id="nav-analyzer">
+          <span class="nav-icon">🔍</span> Profile Analyzer
+        </button>
+        <button class="nav-item" data-section="verify" id="nav-verify">
+          <span class="nav-icon">🛡️</span> Verification
+        </button>
+        <button class="nav-item" data-section="whatsapp" id="nav-whatsapp">
+          <span class="nav-icon">🟢</span> WhatsApp
+          <span id="whatsapp-badge" class="nav-badge nav-badge-green" hidden>0</span>
+        </button>
+        <button class="nav-item" data-section="conversations" id="nav-conversations">
+          <span class="nav-icon">💬</span> Conversations
+        </button>
+        <button class="nav-item" data-section="spinner" id="nav-spinner">
+          <span class="nav-icon">✍️</span> Message Variations
+        </button>
+        <button class="nav-item" data-section="langlab" id="nav-langlab">
+          <span class="nav-icon">🌐</span> Language Lab
+        </button>
+        <button class="nav-item" data-section="creators" id="nav-creators">
+          <span class="nav-icon">👤</span> Creators
+        </button>
+        <button class="nav-item" data-section="ops" id="nav-ops">
+          <span class="nav-icon">📦</span> Ops Pipeline
+          <span id="ops-badge" class="nav-badge nav-badge-violet" hidden>0</span>
+        </button>
+        <button class="nav-item" data-section="actions" id="nav-actions">
+          <span class="nav-icon">🔔</span> Needs Action
+          <span id="actions-badge" class="nav-badge" hidden>0</span>
+        </button>
+        <button class="nav-item" data-section="dealers" id="nav-dealers">
+          <span class="nav-icon">📍</span> Dealers
+        </button>
+        <button class="nav-item" data-section="clients" id="nav-clients">
+          <span class="nav-icon">🏢</span> Clients
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <label for="client-filter">Active Client</label>
+        <select id="client-filter"><option value="">All clients</option></select>
+
+        <div class="ai-status-card" id="ai-status-card">
+          <div class="ai-status-header">
+            <span class="pulse-dot" id="ai-dot"></span>
+            <span id="ai-label">AI Negotiator</span>
+          </div>
+          <button id="negotiator-toggle" class="toggle-btn" data-paused="false">Pause AI</button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="content">
+      <header class="topbar">
+        <div class="topbar-left">
+          <h1 id="section-title">Overview</h1>
+          <span class="topbar-sub" id="topbar-sub">Multi-Brand UGC Outreach Engine · Automated Pipeline</span>
+        </div>
+        <div class="topbar-right">
+          <div class="live-badge">
+            <span class="live-dot"></span> Live
+          </div>
+          <button class="icon-btn" id="refresh-btn" title="Refresh">↻</button>
+        </div>
+      </header>
+
+      <!-- ═══ OVERVIEW ═══ -->
+      <section id="section-overview" class="section">
+        <div class="kpi-row" id="kpi-row"></div>
+
+        <div class="two-col">
+          <div class="panel">
+            <div class="panel-head">
+              <h2>📊 Language Breakdown</h2>
+              <span class="panel-hint">Creators by resolved regional language</span>
+            </div>
+            <div id="language-chart" class="bar-list"></div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head">
+              <h2>🚀 Deal Pipeline</h2>
+              <span class="panel-hint">Current status across all negotiations</span>
+            </div>
+            <div id="pipeline-chart" class="pipeline-list"></div>
+          </div>
+        </div>
+
+        <!-- Live Activity Feed -->
+        <div class="panel activity-feed">
+          <div class="panel-head">
+            <h2>⚡ Live Activity Feed</h2>
+            <span class="panel-hint">Real-time events across all campaigns</span>
+          </div>
+          <div class="activity-feed-list" id="activity-feed-list">
+            <div class="empty-state">No activity yet. Events will appear here as creators interact.</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══ UPLOAD DATA ═══ -->
+      <section id="section-upload" class="section" hidden>
+        <div class="panel upload-intro">
+          <div class="upload-intro-row">
+            <div class="panel-head" style="margin:0">
+              <h2>Upload creator exports by platform</h2>
+              <span class="panel-hint">Drop each platform's .xlsx into its own column. Any creator whose export has a WhatsApp number is routed automatically into the <b>WhatsApp</b> dashboard — that's the final contact channel where the AI negotiates.</span>
+            </div>
+            <label class="upload-client-label">
+              Client
+              <select id="upload-client-select" required></select>
+            </label>
+          </div>
+          <div class="funnel-strip">
+            <span class="funnel-node">📸 Instagram</span>
+            <span class="funnel-node">📘 Facebook</span>
+            <span class="funnel-node">▶️ YouTube</span>
+            <span class="funnel-node">💼 LinkedIn</span>
+            <span class="funnel-arrow">→</span>
+            <span class="funnel-node funnel-node-final">🟢 WhatsApp (auto)</span>
+          </div>
+        </div>
+
+        <div class="upload-grid" id="upload-grid"><!-- platform cards injected by app.js --></div>
+      </section>
+
+      <!-- ═══ INSTAGRAM SCRAPER ═══ -->
+      <section id="section-scrape" class="section" hidden>
+        <div class="panel scrape-panel">
+          <div class="upload-intro-row">
+            <div class="panel-head" style="margin:0">
+              <h2>📸 Instagram Scraper <span class="scrape-live-tag">live · Apify</span></h2>
+              <span class="panel-hint">Pull reels straight into the platform — no manual export. Enter Instagram usernames, profile URLs, or reel URLs (one per line). Any WhatsApp number found in captions is routed to the WhatsApp dashboard automatically. Uses your Apify credits (~$2.60 / 1,000 reels).</span>
+            </div>
+            <label class="upload-client-label">
+              Client
+              <select id="scrape-client-select" required></select>
+            </label>
+          </div>
+          <div class="scrape-row">
+            <textarea id="scrape-targets" class="scrape-targets" rows="4" placeholder="natgeo&#10;https://instagram.com/anotherhandle&#10;https://instagram.com/reel/XXXX/"></textarea>
+            <div class="scrape-controls">
+              <label class="scrape-limit-label">Max reels / profile
+                <input type="number" id="scrape-limit" value="25" min="1" max="200">
+              </label>
+              <button class="btn btn-primary" id="scrape-btn">▶ Scrape now</button>
+            </div>
+          </div>
+          <div class="scrape-status" id="scrape-status"></div>
+        </div>
+
+        <div class="panel scrape-panel">
+          <div class="upload-intro-row">
+            <div class="panel-head" style="margin:0">
+              <h2>#️⃣ Scrape by Hashtag <span class="scrape-live-tag">live · Apify</span></h2>
+              <span class="panel-hint">Discover creators you don't know yet — enter hashtags (one per line, with or without #). Every post/reel carrying the tag is pulled in and its owner added as a creator, phone numbers from captions routed to WhatsApp automatically. Uses your Apify credits (~$2.60 / 1,000 results).</span>
+            </div>
+            <label class="upload-client-label">
+              Client
+              <select id="hashtag-client-select" required></select>
+            </label>
+          </div>
+          <div class="scrape-row">
+            <textarea id="hashtag-targets" class="scrape-targets" rows="4" placeholder="tiling&#10;bathroomrenovation&#10;#homedecor"></textarea>
+            <div class="scrape-controls">
+              <label class="scrape-limit-label">Content type
+                <select id="hashtag-content-type">
+                  <option value="posts">Posts</option>
+                  <option value="reels">Reels</option>
+                </select>
+              </label>
+              <label class="scrape-limit-label">Max results / hashtag
+                <input type="number" id="hashtag-limit" value="20" min="1" max="200">
+              </label>
+              <button class="btn btn-primary" id="hashtag-btn">▶ Scrape now</button>
+            </div>
+          </div>
+          <div class="scrape-status" id="hashtag-status"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head" style="margin-bottom:12px; display:flex; align-items:center; justify-content:space-between; gap:12px;">
+            <div>
+              <h2>Instagram results so far</h2>
+              <span class="panel-hint">Creators scraped for the selected client — jump to the Creators or WhatsApp tab to work them</span>
+            </div>
+            <button class="btn btn-small" id="scrape-export-btn">⬇ Export to Excel</button>
+          </div>
+          <div class="scrape-stats" id="scrape-stats"></div>
+        </div>
+      </section>
+
+      <!-- ═══ PROFILE ANALYZER ═══ -->
+      <section id="section-analyzer" class="section" hidden>
+        <div class="panel scrape-panel">
+          <div class="upload-intro-row">
+            <div class="panel-head" style="margin:0">
+              <h2>🔍 AI Profile Analyzer</h2>
+              <span class="panel-hint">Evaluate an Instagram creator against your active campaign requirements. Claude evaluates their bio, follower count, and recent posts to generate a fit score and recommendation.</span>
+            </div>
+            <label class="upload-client-label">
+              Client
+              <select id="analyzer-client-select" required></select>
+            </label>
+          </div>
+          <div class="scrape-row">
+            <input type="text" id="analyzer-target" class="toolbar-search" placeholder="Enter Instagram username (e.g. natgeo)" style="flex:1; max-width:100%; min-height: 44px;">
+            <button class="btn btn-primary" id="analyzer-btn" style="min-width: 140px;">Analyze</button>
+          </div>
+          <div class="scrape-status" id="analyzer-status"></div>
+        </div>
+
+        <div id="analyzer-result" style="display:none; animation: fadeIn 0.4s ease;">
+          <div class="panel">
+            <div class="two-col" style="align-items: start; gap: 24px;">
+              <div>
+                <div style="display:flex; align-items:center; gap:12px; margin-bottom: 16px;">
+                  <h2 id="analyzer-res-username" style="font-size: 20px; font-weight:800; color:var(--text-bright);">@username</h2>
+                  <span id="analyzer-res-verdict" class="badge"></span>
+                </div>
+                <div style="font-size:42px; font-weight:900; color:var(--accent); line-height:1; margin-bottom: 8px;">
+                  <span id="analyzer-res-score">0</span><span style="font-size:20px; color:var(--text-muted)">/10</span>
+                </div>
+                <p id="analyzer-res-summary" style="color:var(--text-secondary); font-size: 13.5px; line-height: 1.6;"></p>
+              </div>
+              <div style="display:flex; flex-direction:column; gap:16px; background: rgba(99, 179, 237, 0.03); padding: 18px; border-radius: var(--radius-md); border: 1px solid var(--border);">
+                <div>
+                  <h4 style="color:var(--accent-green); font-size:12px; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:8px; font-weight:700;">✅ Pros</h4>
+                  <ul id="analyzer-res-pros" style="list-style:none; padding:0; margin:0; font-size:12.5px; color:var(--text-secondary); display:flex; flex-direction:column; gap:6px;"></ul>
+                </div>
+                <div>
+                  <h4 style="color:var(--accent-red); font-size:12px; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:8px; font-weight:700;">⚠️ Cons</h4>
+                  <ul id="analyzer-res-cons" style="list-style:none; padding:0; margin:0; font-size:12.5px; color:var(--text-secondary); display:flex; flex-direction:column; gap:6px;"></ul>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══ VERIFICATION (points 46-50) ═══ -->
+      <section id="section-verify" class="section" hidden>
+        <div class="panel scrape-panel">
+          <div class="upload-intro-row">
+            <div class="panel-head" style="margin:0">
+              <h2>🛡️ Creator Verification</h2>
+              <span class="panel-hint">Vet a creator before spending a manual DM or a voucher on them. Checks for fake/bought followers, engagement-pod activity, brand-unsafe content, and any recorded reputation history — so you don't waste outreach volume (or Meta trust) on a bad account.</span>
+            </div>
+            <label class="upload-client-label">
+              Client
+              <select id="verify-client-select" required></select>
+            </label>
+          </div>
+          <div class="scrape-row">
+            <input type="text" id="verify-target" class="toolbar-search" placeholder="Enter Instagram username (e.g. natgeo)" style="flex:1; max-width:100%; min-height:44px;">
+            <button class="btn btn-primary" id="verify-btn" style="min-width:140px;">Verify</button>
+          </div>
+          <div class="scrape-status" id="verify-status"></div>
+        </div>
+
+        <div id="verify-result" style="display:none; animation: fadeIn 0.4s ease;">
+          <div class="panel">
+            <div class="verify-scorehead">
+              <div>
+                <div style="display:flex; align-items:center; gap:12px;">
+                  <h2 id="verify-res-username" style="font-size:20px; font-weight:800; color:var(--text-bright);">@username</h2>
+                  <span id="verify-res-verdict" class="badge"></span>
+                </div>
+                <p id="verify-res-meta" class="muted" style="font-size:12px; margin-top:6px;"></p>
+              </div>
+              <div class="verify-trust">
+                <div class="verify-trust-num"><span id="verify-res-trust">0</span><span style="font-size:18px; color:var(--text-muted)">/100</span></div>
+                <div class="verify-trust-label">Trust score</div>
+              </div>
+            </div>
+            <div class="verify-checks" id="verify-checks"></div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head" style="margin-bottom:12px">
+              <h2>📓 Reputation history</h2>
+              <span class="panel-hint">A creator's track record follows them across all clients. Log an outcome after each collaboration — a "scam" flag blacklists them everywhere.</span>
+            </div>
+            <div class="rep-add-row">
+              <select id="rep-event">
+                <option value="good">✅ Good — delivered as agreed</option>
+                <option value="late">🕒 Late delivery</option>
+                <option value="ghosted">👻 Ghosted after agreeing</option>
+                <option value="fake_content">⚠️ Poor/fake content</option>
+                <option value="scam">⛔ Scam — took product, no post</option>
+                <option value="note">📝 Note</option>
+              </select>
+              <input type="text" id="rep-detail" class="toolbar-search" placeholder="Optional detail (e.g. took ₹2000 voucher, never posted)">
+              <button class="btn btn-primary" id="rep-add-btn">Add record</button>
+            </div>
+            <div id="rep-list" class="rep-list"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══ LANGUAGE LAB (points 42-45) ═══ -->
+      <section id="section-langlab" class="section" hidden>
+        <div class="panel">
+          <div class="panel-head">
+            <h2>🌐 Language Lab</h2>
+            <span class="panel-hint">Talk to each creator the way they actually talk. Detect how a creator writes, translate your message into any of 20 Indian languages (romanized, the way creators type), and catch culturally-sensitive wording before you hit send.</span>
+          </div>
+          <div class="langlab-tabs">
+            <button class="langlab-tab active" data-lltab="style">🗣️ Detect Style</button>
+            <button class="langlab-tab" data-lltab="translate">🔄 Translate</button>
+            <button class="langlab-tab" data-lltab="sensitivity">🚦 Sensitivity Check</button>
+          </div>
+
+          <!-- Detect style (42/43) -->
+          <div class="langlab-pane" data-llpane="style">
+            <span class="panel-hint">Paste a creator's message. See their language, register, and regional dialect — plus a tip on how to reply in the same voice.</span>
+            <textarea id="ll-style-input" class="spinner-textarea" rows="3" placeholder="e.g. dada apnar reel ta darun hoyeche, amar sathe collab korben?"></textarea>
+            <button class="btn btn-primary" id="ll-style-btn">Detect style</button>
+            <span class="panel-hint" id="ll-style-status"></span>
+            <div id="ll-style-result" class="ll-result"></div>
+          </div>
+
+          <!-- Translate (44) -->
+          <div class="langlab-pane" data-llpane="translate" hidden>
+            <span class="panel-hint">Translate your outreach into a creator's language, ready to paste into a DM.</span>
+            <textarea id="ll-tr-input" class="spinner-textarea" rows="3" placeholder="e.g. Hi! We love your content and would like to collaborate with you."></textarea>
+            <div class="spinner-controls">
+              <label>Target language:
+                <select id="ll-tr-lang"></select>
+              </label>
+              <label class="checkbox-label"><input type="checkbox" id="ll-tr-romanized" checked> Romanized (English letters)</label>
+              <button class="btn btn-primary" id="ll-tr-btn">Translate</button>
+              <span class="panel-hint" id="ll-tr-status"></span>
+            </div>
+            <div id="ll-tr-result" class="ll-result"></div>
+          </div>
+
+          <!-- Sensitivity (45) -->
+          <div class="langlab-pane" data-llpane="sensitivity" hidden>
+            <span class="panel-hint">Check a message for anything culturally, religiously, or regionally off before you send it.</span>
+            <textarea id="ll-sens-input" class="spinner-textarea" rows="3" placeholder="e.g. Hey bro, hope you had a great beef biryani this Eid!"></textarea>
+            <div class="spinner-controls">
+              <label>Audience language:
+                <select id="ll-sens-lang"></select>
+              </label>
+              <input type="text" id="ll-sens-region" class="toolbar-search" placeholder="Region (optional, e.g. Gujarat)" style="max-width:240px;">
+              <button class="btn btn-primary" id="ll-sens-btn">Check</button>
+              <span class="panel-hint" id="ll-sens-status"></span>
+            </div>
+            <div id="ll-sens-result" class="ll-result"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══ WHATSAPP ═══ -->
+      <section id="section-whatsapp" class="section" hidden>
+        <div class="panel wa-intro">
+          <div class="panel-head" style="margin:0">
+            <h2>WhatsApp contacts</h2>
+            <span class="panel-hint">Every creator with a discovered WhatsApp number, pulled from all source platforms. Click the WhatsApp button to open a pre-filled chat, or let the AI negotiator handle inbound replies.</span>
+          </div>
+        </div>
+        <div class="toolbar">
+          <select id="wa-platform-filter" aria-label="Filter by source platform">
+            <option value="">All sources</option>
+            <option value="instagram">Instagram</option>
+            <option value="facebook">Facebook</option>
+            <option value="youtube">YouTube</option>
+            <option value="linkedin">LinkedIn</option>
+          </select>
+          <select id="wa-status-filter" aria-label="Filter by status">
+            <option value="">All statuses</option>
+            <option>Not Sent</option>
+            <option>Sent</option>
+            <option>Replied</option>
+            <option>Converted</option>
+            <option>Not Interested</option>
+          </select>
+          <input type="text" id="wa-search" class="toolbar-search" placeholder="Search name, phone, niche…" aria-label="Search WhatsApp contacts">
+          <span class="toolbar-count" id="wa-count"></span>
+        </div>
+        <div class="table-wrap">
+          <table id="whatsapp-table">
+            <thead>
+              <tr>
+                <th>Creator</th><th>Source</th><th>Language</th>
+                <th>Niche</th><th>Phone</th><th>Status</th><th>Chat</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+          <div class="empty-state" id="whatsapp-empty" hidden>No WhatsApp numbers yet. Upload a platform export with contact numbers and they'll appear here automatically.</div>
+        </div>
+      </section>
+
+      <!-- ═══ CONVERSATIONS ═══ -->
+      <section id="section-conversations" class="section" hidden>
+        <div class="toolbar">
+          <select id="conv-channel-filter" aria-label="Filter by channel">
+            <option value="">All channels</option>
+            <option value="instagram">📸 Instagram</option>
+            <option value="whatsapp">🟢 WhatsApp</option>
+            <option value="facebook">🔵 Facebook (coming soon)</option>
+          </select>
+          <span class="panel-hint" id="conv-capture-hint">Select a client in the sidebar to auto-route any WhatsApp number a creator shares here into the WhatsApp section.</span>
+        </div>
+        <div class="split">
+          <div class="conv-list" id="conv-list">
+            <div class="conv-search-wrap">
+              <input type="text" id="conv-search" placeholder="Search conversations…" class="conv-search" aria-label="Search conversations">
+            </div>
+            <div id="conv-list-items">
+              <div class="empty-state">No conversations yet.</div>
+            </div>
+          </div>
+          <div class="conv-thread" id="conv-thread">
+            <div class="empty-state thread-placeholder">
+              <div class="placeholder-icon">💬</div>
+              <p>Select a conversation to view the transcript</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══ MESSAGE VARIATIONS (spam-safe outreach) ═══ -->
+      <section id="section-spinner" class="section" hidden>
+        <div class="panel">
+          <div class="panel-head">
+            <h2>✍️ Message Variations</h2>
+            <span class="panel-hint">Type one outreach message. AI generates 15 reworded versions with the same meaning, so the first manual DM to each creator isn't identical text — Meta flags duplicate messages as spam. Copy a different one for each person. Works in English and romanized regional languages (Hinglish, Bengali, etc.).</span>
+          </div>
+          <div class="spinner-input-row">
+            <textarea id="spinner-input" class="spinner-textarea" rows="3" placeholder="e.g. Hi! We love your content and would like to collaborate with you for our brand MYK Laticrete. Are you interested?"></textarea>
+          </div>
+          <div class="spinner-controls">
+            <label>Variations:
+              <select id="spinner-count">
+                <option value="10">10</option>
+                <option value="15" selected>15</option>
+                <option value="20">20</option>
+              </select>
+            </label>
+            <button class="btn btn-primary" id="spinner-generate-btn">Generate variations</button>
+            <span class="panel-hint" id="spinner-status"></span>
+          </div>
+          <div id="spinner-results" class="spinner-results"></div>
+        </div>
+      </section>
+
+      <!-- ═══ CREATORS ═══ -->
+      <section id="section-creators" class="section" hidden>
+        <div class="toolbar">
+          <select id="creator-status-filter" aria-label="Filter by status">
+            <option value="">All statuses</option>
+            <option>Not Sent</option>
+            <option>Sent</option>
+            <option>Replied</option>
+            <option>Converted</option>
+            <option>Not Interested</option>
+          </select>
+          <select id="creator-channel-filter" aria-label="Filter by source platform">
+            <option value="">All sources</option>
+            <option value="instagram">Instagram</option>
+            <option value="facebook">Facebook</option>
+            <option value="youtube">YouTube</option>
+            <option value="linkedin">LinkedIn</option>
+          </select>
+          <span class="toolbar-count" id="creators-count"></span>
+        </div>
+        <div class="table-wrap">
+          <table id="creators-table">
+            <thead>
+              <tr>
+                <th>Creator</th><th>Source</th><th>Language</th>
+                <th>Niche</th><th>Phone</th><th>Status</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+          <div class="empty-state" id="creators-empty" hidden>No creators found. Run build_outreach_queue.py to populate.</div>
+        </div>
+      </section>
+
+      <!-- ═══ OPS PIPELINE ═══ -->
+      <section id="section-ops" class="section" hidden>
+        <div class="panel wa-intro">
+          <div class="panel-head" style="margin:0">
+            <h2>Post-deal fulfillment</h2>
+            <span class="panel-hint">Every creator whose deal is Converted, tracked from product purchase through content verification to payout. Move each card forward as fulfillment progresses.</span>
+          </div>
+        </div>
+        <div class="toolbar">
+          <span class="toolbar-count" id="ops-count"></span>
+          <button class="btn btn-small" id="ops-export-btn" style="margin-left:auto">⬇ Export payout-ready CSV</button>
+        </div>
+        <div class="table-wrap">
+          <table id="ops-table">
+            <thead>
+              <tr><th>Creator</th><th>Source</th><th>Niche</th><th>Phone</th><th>Fulfillment Stage</th><th>AI Content QC</th></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+          <div class="empty-state" id="ops-empty" hidden>No converted deals yet. Once a creator's status becomes "Converted", they'll show up here for fulfillment tracking.</div>
+        </div>
+      </section>
+
+      <!-- ═══ ACTIONS ═══ -->
+      <section id="section-actions" class="section" hidden>
+        <div class="toolbar">
+          <label class="checkbox-label">
+            <input type="checkbox" id="show-resolved"> Show resolved
+          </label>
+        </div>
+        <div class="table-wrap">
+          <table id="actions-table">
+            <thead>
+              <tr><th>When</th><th>Event</th><th>Channel</th><th>Contact</th><th>Detail</th><th></th></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+          <div class="empty-state" id="actions-empty" hidden>🎉 Nothing needs review right now.</div>
+        </div>
+      </section>
+
+      <!-- ═══ DEALERS ═══ -->
+      <section id="section-dealers" class="section" hidden>
+        <div class="panel scrape-panel">
+          <div class="upload-intro-row">
+            <div class="panel-head" style="margin:0">
+              <h2>📍 Dealer / Stockist Directory</h2>
+              <span class="panel-hint">Upload the client's dealer list to enable nearest-dealer lookup for converted creators (product pickup / verification). Matches by exact pincode, falling back to state.</span>
+            </div>
+            <label class="upload-client-label">
+              Client
+              <select id="dealers-client-select" required></select>
+            </label>
+          </div>
+          <div class="dropzone" id="dealers-dropzone">
+            <div class="dropzone-icon">📍</div>
+            <p>Drop dealer list <b>.xlsx</b>, or <span class="dropzone-browse">browse</span></p>
+            <div class="dropzone-filename muted" id="dealers-filename" hidden></div>
+            <input type="file" id="dealers-fileinput" accept=".xlsx,.xls" hidden>
+          </div>
+          <button class="btn btn-primary" id="dealers-upload-btn" disabled>Upload dealer list</button>
+          <div class="form-message" id="dealers-msg"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-head" style="margin-bottom:12px">
+            <h2>Dealers on file</h2>
+            <span class="panel-hint" id="dealers-count"></span>
+          </div>
+          <div class="table-wrap">
+            <table id="dealers-table">
+              <thead><tr><th>Dealer</th><th>Pincode</th><th>City</th><th>State</th><th>Phone</th></tr></thead>
+              <tbody></tbody>
+            </table>
+            <div class="empty-state" id="dealers-empty">No dealers uploaded yet for this client.</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══ CLIENTS ═══ -->
+      <section id="section-clients" class="section" hidden>
+        <div class="clients-grid" id="clients-grid"></div>
+        <div class="panel">
+          <div class="panel-head">
+            <h2>Add New Client</h2>
+            <span class="panel-hint">Creates config/&lt;client_key&gt;.json automatically</span>
+          </div>
+          <form id="add-client-form" class="form-grid">
+            <label>Client Key <small>(a-z, 0-9, _)</small><input name="client_key" required pattern="[a-z0-9_]+" placeholder="acme_tiles"></label>
+            <label>Client Name<input name="client_name" required placeholder="Acme Tiles Pvt Ltd"></label>
+            <label>Brand Display Name<input name="brand_display_name" placeholder="Acme Tiles"></label>
+            <label>Campaign Name<input name="campaign_name" placeholder="Mason UGC Program"></label>
+            <label>Offer Line<input name="offer_line" placeholder="₹2000 Amazon Voucher + product reimbursement"></label>
+            <label>Default Language<input name="default_language" value="Hindi"></label>
+            <label>Opening Voucher (INR)<input name="opening_voucher_inr" type="number" value="1000"></label>
+            <label>Max Voucher (INR)<input name="max_voucher_inr" type="number" value="2000"></label>
+            <label>Voucher Type<input name="voucher_type" value="Amazon Voucher"></label>
+            <label class="full-width">Reimbursement<input name="reimbursement" placeholder="We'll reimburse the MYK Laticrete product purchase"></label>
+            <label class="full-width">Deliverables<input name="deliverables" placeholder="Buy MYK product + 2 tiles, make a Reel, post to feed"></label>
+            <div class="checkbox-row">
+              <label class="checkbox-label"><input type="checkbox" name="whatsapp_enabled" checked> WhatsApp</label>
+              <label class="checkbox-label"><input type="checkbox" name="instagram_enabled" checked> Instagram</label>
+              <label class="checkbox-label"><input type="checkbox" name="facebook_enabled"> Facebook</label>
+            </div>
+            <button type="submit" class="btn btn-primary full-width">+ Create Client</button>
+            <div class="form-message" id="add-client-message"></div>
+          </form>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- ═══ AI CONTENT QC MODAL ═══ -->
+  <div class="modal-overlay" id="qc-modal" hidden>
+    <div class="modal-card" style="width:min(560px, 92vw)">
+      <div class="modal-head">
+        <h2 id="qc-modal-title">AI Content QC</h2>
+        <button class="icon-btn" id="qc-modal-close" title="Close">✕</button>
+      </div>
+      <div class="modal-body">
+        <label class="upload-client-label" style="width:100%">
+          Content URL (Instagram reel or post link)
+          <input type="text" id="qc-content-url" class="toolbar-search" style="width:100%" placeholder="https://instagram.com/reel/XXXX/">
+        </label>
+        <div class="scrape-status" id="qc-status"></div>
+        <div id="qc-result" style="display:none">
+          <div class="preview-stat-row" id="qc-result-badges"></div>
+          <p id="qc-result-summary" style="font-size:12.5px; color:var(--text-secondary); line-height:1.6; margin-top:10px"></p>
+          <div style="display:flex; gap:16px; margin-top:8px; flex-wrap:wrap">
+            <div>
+              <div class="preview-section-title">Pros</div>
+              <ul id="qc-result-pros" style="list-style:none; padding:0; margin:0; font-size:12px; color:var(--text-secondary); display:flex; flex-direction:column; gap:4px;"></ul>
+            </div>
+            <div>
+              <div class="preview-section-title">Cons</div>
+              <ul id="qc-result-cons" style="list-style:none; padding:0; margin:0; font-size:12px; color:var(--text-secondary); display:flex; flex-direction:column; gap:4px;"></ul>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn" id="qc-cancel-btn">Close</button>
+        <button class="btn btn-primary" id="qc-run-btn">▶ Run QC</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ UPLOAD PREVIEW MODAL ═══ -->
+  <div class="modal-overlay" id="preview-modal" hidden>
+    <div class="modal-card">
+      <div class="modal-head">
+        <h2 id="preview-modal-title">Preview import</h2>
+        <button class="icon-btn" id="preview-modal-close" title="Close">✕</button>
+      </div>
+      <div class="modal-body" id="preview-modal-body"><!-- injected by app.js --></div>
+      <div class="modal-actions">
+        <button class="btn" id="preview-cancel-btn">Cancel</button>
+        <button class="btn btn-primary" id="preview-confirm-btn">✓ Confirm import</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

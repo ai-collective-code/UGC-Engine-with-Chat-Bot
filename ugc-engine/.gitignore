@@ -1,0 +1,19 @@
+# Secrets -- never commit real credentials
+.env
+
+# Local SQLite database -- contains real creator PII (names, phone numbers)
+# and conversation history once the negotiator runs. Never commit.
+data/
+
+# Per-client campaign configs -- contain real brand names, negotiation
+# budgets, and deliverable terms. This repo is public; keep client business
+# data out of it. .env.example above stays as the credential template.
+config/*.json
+
+__pycache__/
+*.pyc
+*.pyo
+
+# Editor / OS cruft
+.DS_Store
+Thumbs.db

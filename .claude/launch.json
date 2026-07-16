@@ -1,0 +1,19 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "Flask UGC Outreach Engine",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["backend/app.py"],
+      "port": 8000,
+      "cwd": "UGC_Outreach_Engine_Reusable new 1/ugc_engine_package"
+    },
+    {
+      "name": "Insta-agent Next.js",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "port": 3000,
+      "cwd": "Insta-agent"
+    }
+  ]
+}

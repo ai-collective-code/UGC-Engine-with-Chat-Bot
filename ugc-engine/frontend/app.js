@@ -187,7 +187,7 @@ function switchSection(section) {
   });
   const titles = {
     overview: "Overview", upload: "Upload Data", scrape: "Instagram Scraper", analyzer: "Profile Analyzer",
-    verify: "Creator Verification", langlab: "Language Lab",
+    verify: "Creator Verification", langlab: "Language Lab", translator: "Translator",
     whatsapp: "WhatsApp Contacts", creators: "Creators", conversations: "Conversations",
     spinner: "Message Variations",
     ops: "Ops Pipeline", dealers: "Dealers", actions: "Needs Action", clients: "Clients",
@@ -203,6 +203,7 @@ function loadSection(section) {
   if (section === "analyzer") return loadAnalyzer();
   if (section === "verify") return loadVerify();
   if (section === "langlab") return loadLangLab();
+  if (section === "translator") return loadTranslator();
   if (section === "whatsapp") return loadWhatsapp();
   if (section === "creators") return loadCreators();
   if (section === "ops") return loadOpsPipeline();
@@ -679,6 +680,9 @@ async function loadDealers() {
 
 // --- Conversations ──────────────────────────────────────────────────────────
 
+// Conversation hiding is VIEW-ONLY and server-side: the backend flags rows as
+// hidden (persisted in settings, so the hide applies on every browser) and we
+// filter them here. Nothing deletes any message; "Show all" restores them.
 async function loadConversations() {
   const channelSel = document.getElementById("conv-channel-filter");
   // Re-run the load whenever the channel filter changes (bind once).
@@ -699,21 +703,30 @@ async function loadConversations() {
   if (state.clientId) params.set("client_id", state.clientId);
   if (channel) params.set("channel", channel);
   const convs = await api(`/api/conversations?${params.toString()}`).catch(() => []);
-  let anyCaptured = false;
+  const anyCaptured = convs.some((c) => c.whatsapp_captured);
+
+  // Filter out conversations the operator has hidden (server-flagged, see above).
+  const visible = convs.filter((c) => !c.hidden);
+  const hiddenCount = convs.length - visible.length;
 
   const listItemsEl = document.getElementById("conv-list-items");
-  listItemsEl.innerHTML = convs.length ? convs.map((c) => {
-    if (c.whatsapp_captured) anyCaptured = true;
-    return `
-    <button class="conv-item" data-client="${escapeHtml(c.client_id)}" data-channel="${escapeHtml(c.channel)}" data-contact="${escapeHtml(c.contact_id)}">
-      <div class="conv-item-top">
-        <span>${escapeHtml(c.contact_id)}</span>
-        <span class="conv-item-channel">${channelLabel(c.channel)}</span>
-      </div>
-      <div class="conv-item-preview">${escapeHtml(c.last_message || "No messages yet")}</div>
-      ${c.whatsapp_captured || c.detected_whatsapp ? '<div class="conv-item-captured">🟢 WhatsApp number captured → WhatsApp section</div>' : ""}
-    </button>`;
-  }).join("") : '<div class="empty-state">No conversations yet.</div>';
+  const hiddenBar = hiddenCount > 0
+    ? `<div class="conv-hidden-bar">${hiddenCount} hidden · <span class="conv-unhide-all" role="button" tabindex="0">Show all</span></div>`
+    : "";
+  const items = visible.map((c) => `
+    <div class="conv-item-wrap">
+      <button class="conv-item" data-client="${escapeHtml(c.client_id)}" data-channel="${escapeHtml(c.channel)}" data-contact="${escapeHtml(c.contact_id)}">
+        <div class="conv-item-top">
+          <span>${escapeHtml(c.contact_id)}</span>
+          <span class="conv-item-channel">${channelLabel(c.channel)}</span>
+        </div>
+        <div class="conv-item-preview">${escapeHtml(c.last_message || "No messages yet")}</div>
+        ${c.whatsapp_captured || c.detected_whatsapp ? '<div class="conv-item-captured">🟢 WhatsApp number captured → WhatsApp section</div>' : ""}
+      </button>
+      <span class="conv-item-hide" role="button" tabindex="0" title="Hide from list" aria-label="Hide conversation" data-channel="${escapeHtml(c.channel)}" data-contact="${escapeHtml(c.contact_id)}">✕</span>
+    </div>`).join("");
+  listItemsEl.innerHTML = hiddenBar
+    + (visible.length ? items : (hiddenCount > 0 ? "" : '<div class="empty-state">No conversations yet.</div>'));
 
   listItemsEl.querySelectorAll(".conv-item").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -721,6 +734,29 @@ async function loadConversations() {
       btn.classList.add("active");
       openConversation(btn.dataset.client, btn.dataset.channel, btn.dataset.contact);
     });
+  });
+
+  // Hide (✕) removes a row from view only — the DB row is untouched.
+  listItemsEl.querySelectorAll(".conv-item-hide").forEach((el) => {
+    const hide = async (e) => {
+      e.stopPropagation();
+      try {
+        await api("/api/conversations/hide", {
+          method: "POST",
+          body: JSON.stringify({ channel: el.dataset.channel, contact_id: el.dataset.contact }),
+        });
+        loadConversations();
+      } catch (err) { showToast(err.message || "Failed to hide", "error"); }
+    };
+    el.addEventListener("click", hide);
+    el.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") hide(e); });
+  });
+  const unhideAll = listItemsEl.querySelector(".conv-unhide-all");
+  if (unhideAll) unhideAll.addEventListener("click", async () => {
+    try {
+      await api("/api/conversations/unhide", { method: "POST", body: JSON.stringify({ all: true }) });
+      loadConversations();
+    } catch (err) { showToast(err.message || "Failed to unhide", "error"); }
   });
 
   // A number captured during this list load means the WhatsApp funnel grew.
@@ -746,12 +782,14 @@ async function openConversation(clientId, channel, contactId) {
 
   // Client-side detection mirrors the backend rule (10-digit Indian mobile in a
   // creator message) purely to show the banner; the backend did the storing.
+  // The backend now auto-captures to the default client even under "All
+  // clients", so a detected number is always added to the WhatsApp section.
   const capturedNumber = detectWhatsappNumber(messages);
-  if (capturedNumber && state.clientId) refreshWhatsappBadge();
+  if (capturedNumber) refreshWhatsappBadge();
 
   const threadEl = document.getElementById("conv-thread");
   const captureBanner = capturedNumber
-    ? `<div class="thread-capture-banner">🟢 WhatsApp number <b>+91${escapeHtml(capturedNumber)}</b> ${state.clientId ? "captured → added to the WhatsApp section" : "detected — select a client to route it into WhatsApp"}</div>`
+    ? `<div class="thread-capture-banner">🟢 WhatsApp number <b>+91${escapeHtml(capturedNumber)}</b> captured → added to the WhatsApp section</div>`
     : "";
   const header = `
     <div class="thread-header">
@@ -1958,6 +1996,113 @@ async function llSensitivity() {
       ${rewrite}`;
     setLL("ll-sens-status", "", "");
   } catch (e) { setLL("ll-sens-status", e.message, "error"); }
+}
+
+// --- Translator (dedicated messaging translator) ─────────────────────────────
+
+let translatorInit = false;
+// Quick-pick chips for the languages most common in this dataset, in order.
+const TR_QUICK_LANGS = ["Hindi", "Bengali", "Tamil", "Telugu", "Marathi", "Gujarati", "Kannada", "Punjabi"];
+
+async function loadTranslator() {
+  if (translatorInit) return;
+  const { languages } = await api("/api/language/supported").catch(() => ({ languages: [] }));
+  const list = languages || [];
+  const opts = list.map((l) => `<option value="${escapeHtml(l)}">${escapeHtml(l)}</option>`).join("");
+
+  const sel = document.getElementById("tr-compose-lang");
+  if (sel) {
+    sel.innerHTML = opts;
+    if (list.includes("Hindi")) sel.value = "Hindi"; // sensible default
+  }
+
+  // Quick-pick chips: only show the ones the backend actually supports.
+  const quick = document.getElementById("tr-quicklang");
+  if (quick) {
+    quick.innerHTML = TR_QUICK_LANGS.filter((l) => list.includes(l))
+      .map((l) => `<button type="button" class="tr-chip${l === "Hindi" ? " active" : ""}" data-lang="${escapeHtml(l)}">${escapeHtml(l)}</button>`)
+      .join("");
+    quick.querySelectorAll(".tr-chip").forEach((chip) => {
+      chip.addEventListener("click", () => {
+        if (sel) sel.value = chip.dataset.lang;
+        quick.querySelectorAll(".tr-chip").forEach((c) => c.classList.toggle("active", c === chip));
+      });
+    });
+  }
+  // Keep the chips in sync if the operator changes the dropdown directly.
+  if (sel && quick) {
+    sel.addEventListener("change", () => {
+      quick.querySelectorAll(".tr-chip").forEach((c) => c.classList.toggle("active", c.dataset.lang === sel.value));
+    });
+  }
+
+  // Tab switching (scoped to tr-* so it can't collide with Language Lab tabs).
+  document.querySelectorAll(".tr-tab").forEach((tab) => {
+    tab.addEventListener("click", () => {
+      document.querySelectorAll(".tr-tab").forEach((t) => t.classList.toggle("active", t === tab));
+      document.querySelectorAll(".tr-pane").forEach((p) => { p.hidden = p.dataset.trpane !== tab.dataset.trtab; });
+    });
+  });
+
+  document.getElementById("tr-compose-btn").addEventListener("click", trCompose);
+  document.getElementById("tr-understand-btn").addEventListener("click", trUnderstand);
+  translatorInit = true;
+}
+
+async function trCompose() {
+  const text = document.getElementById("tr-compose-input").value.trim();
+  const target = document.getElementById("tr-compose-lang").value;
+  const romanized = document.getElementById("tr-compose-romanized").checked;
+  const out = document.getElementById("tr-compose-result");
+  if (!text) { setLL("tr-compose-status", "Type a message first.", "error"); return; }
+  setLL("tr-compose-status", "Translating…", ""); out.innerHTML = "";
+  try {
+    const r = await api("/api/language/translate", {
+      method: "POST",
+      body: JSON.stringify({ text, target_language: target, romanized }),
+    });
+    out.innerHTML = `
+      <div class="ll-translation">
+        <div class="ll-translation-head">${escapeHtml(r.target_language)}${r.romanized ? " · romanized" : ""}</div>
+        <div class="ll-translation-text">${escapeHtml(r.translation)}</div>
+        <button class="btn btn-small" id="tr-compose-copy">📋 Copy</button>
+      </div>`;
+    document.getElementById("tr-compose-copy").addEventListener("click", async () => {
+      try { await navigator.clipboard.writeText(r.translation); showToast("Copied — paste into the DM", "success"); }
+      catch { showToast("Copy failed — select and copy manually", "error"); }
+    });
+    setLL("tr-compose-status", "", "");
+  } catch (e) { setLL("tr-compose-status", e.message, "error"); }
+}
+
+async function trUnderstand() {
+  const text = document.getElementById("tr-understand-input").value.trim();
+  const out = document.getElementById("tr-understand-result");
+  if (!text) { setLL("tr-understand-status", "Paste their message first.", "error"); return; }
+  setLL("tr-understand-status", "Translating…", ""); out.innerHTML = "";
+  try {
+    // Translate to English and read their writing style in parallel; the style
+    // read is best-effort (null on failure) so a hiccup there still shows the
+    // English meaning.
+    const [tr, style] = await Promise.all([
+      api("/api/language/translate", { method: "POST", body: JSON.stringify({ text, target_language: "English", romanized: false }) }),
+      api("/api/language/detect-style", { method: "POST", body: JSON.stringify({ text }) }).catch(() => null),
+    ]);
+    const styleBlock = style ? `
+      <div class="ll-grid">
+        <div><span class="ll-k">Language</span><span class="ll-v">${escapeHtml(style.language)}${style.romanized ? " (romanized)" : ""}</span></div>
+        <div><span class="ll-k">Register</span><span class="ll-v">${escapeHtml(style.register)}</span></div>
+        <div><span class="ll-k">Dialect</span><span class="ll-v">${escapeHtml(style.dialect)}</span></div>
+      </div>
+      <div class="ll-tip">💡 <b>How to reply:</b> ${escapeHtml(style.mirror_tip || "—")}</div>` : "";
+    out.innerHTML = `
+      <div class="ll-translation">
+        <div class="ll-translation-head">English meaning</div>
+        <div class="ll-translation-text">${escapeHtml(tr.translation)}</div>
+      </div>
+      ${styleBlock}`;
+    setLL("tr-understand-status", "", "");
+  } catch (e) { setLL("tr-understand-status", e.message, "error"); }
 }
 
 // --- Init ───────────────────────────────────────────────────────────────────

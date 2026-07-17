@@ -46,16 +46,40 @@ export async function fetchInstagramProfile(igsid: string): Promise<InstagramPro
   }
 }
 
-export async function sendInstagramMessage(recipientIgsid: string, text: string) {
+// Optional tappable buttons shown above the composer. On Instagram, tapping one
+// sends its title as a normal text message and echoes its payload back in the
+// webhook (message.quick_reply.payload). Meta caps: <=13 buttons, title <=20 chars.
+export interface QuickReplyButton {
+  title: string;
+  payload: string;
+}
+
+export async function sendInstagramMessage(
+  recipientIgsid: string,
+  text: string,
+  quickReplies?: QuickReplyButton[]
+) {
   const url = new URL("https://graph.instagram.com/v24.0/me/messages");
   url.searchParams.set("access_token", requireEnv("INSTAGRAM_ACCESS_TOKEN"));
+
+  const message: {
+    text: string;
+    quick_replies?: { content_type: "text"; title: string; payload: string }[];
+  } = { text };
+  if (quickReplies?.length) {
+    message.quick_replies = quickReplies.map((q) => ({
+      content_type: "text",
+      title: q.title.slice(0, 20),
+      payload: q.payload,
+    }));
+  }
 
   const res = await fetch(url.toString(), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       recipient: { id: recipientIgsid },
-      message: { text },
+      message,
     }),
   });
   const data = await res.json();

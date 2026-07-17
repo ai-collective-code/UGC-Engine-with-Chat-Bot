@@ -965,6 +965,37 @@ def _route_number_to_whatsapp(client_id, contact_id, number):
     return number
 
 
+def _default_capture_client_id(active_client_id=None):
+    """Which client an auto-captured WhatsApp number attaches to. Prefer the
+    actively-selected client; otherwise fall back to the first client so numbers
+    are captured even under "All clients" (IG DMs aren't tied to a client)."""
+    if active_client_id:
+        return active_client_id
+    clients = local_db.list_clients()
+    return clients[0]["id"] if clients else None
+
+
+HIDDEN_CONVS_SETTING = "hidden_conversations"
+
+
+def _get_hidden_conversations():
+    """Set of "channel::contact_id" keys the operator has hidden from the
+    conversations list. Persisted in the settings table so the hide applies on
+    every browser. View-only -- messages are never deleted."""
+    try:
+        return set(json.loads(local_db.get_setting(HIDDEN_CONVS_SETTING, "[]")))
+    except Exception:
+        return set()
+
+
+def _save_hidden_conversations(keys):
+    local_db.set_setting(HIDDEN_CONVS_SETTING, json.dumps(sorted(keys)))
+
+
+def _conv_key(channel, contact_id):
+    return f"{channel}::{contact_id}"
+
+
 @app.route("/api/conversations", methods=["GET"])
 def api_list_conversations():
     channel = request.args.get("channel")
@@ -980,17 +1011,55 @@ def api_list_conversations():
     if channel in (None, supabase_bridge.CHANNEL):
         ig = supabase_bridge.list_instagram_conversations()
         # Auto-route: any creator who dropped a WhatsApp number in a DM gets
-        # upserted into the WhatsApp funnel, attached to the active client. Only
-        # possible when a specific client is selected (Instagram DMs aren't tied
-        # to one); with "All clients" we can't attribute, so we skip silently.
+        # upserted into the WhatsApp funnel automatically. IG DMs aren't tied to
+        # a client, so with "All clients" we attribute to the default (first)
+        # client rather than skipping — the number is captured either way.
+        capture_client_id = _default_capture_client_id(active_client_id)
         for c in ig:
             num = c.get("detected_whatsapp")
-            if num and active_client_id:
-                if _route_number_to_whatsapp(active_client_id, c["contact_id"], num):
+            if num and capture_client_id:
+                if _route_number_to_whatsapp(capture_client_id, c["contact_id"], num):
                     c["whatsapp_captured"] = True
         convos = convos + ig
         convos.sort(key=lambda c: c.get("last_message_at") or "", reverse=True)
+    # Flag operator-hidden conversations (view-only) rather than dropping them,
+    # so the frontend can show a "N hidden / Show all" control. No deletion.
+    hidden = _get_hidden_conversations()
+    for c in convos:
+        c["hidden"] = _conv_key(c.get("channel"), c.get("contact_id")) in hidden
     return jsonify(convos)
+
+
+@app.route("/api/conversations/hide", methods=["POST"])
+def api_hide_conversation():
+    """Hide a conversation from the list (view-only, reversible). Does NOT
+    delete the conversation or any of its messages."""
+    payload = request.get_json(silent=True) or {}
+    channel = str(payload.get("channel") or "").strip()
+    contact_id = str(payload.get("contact_id") or "").strip()
+    if not channel or not contact_id:
+        return jsonify({"error": "channel and contact_id are required"}), 400
+    hidden = _get_hidden_conversations()
+    hidden.add(_conv_key(channel, contact_id))
+    _save_hidden_conversations(hidden)
+    return jsonify({"status": "hidden", "hidden_count": len(hidden)})
+
+
+@app.route("/api/conversations/unhide", methods=["POST"])
+def api_unhide_conversation():
+    """Un-hide one conversation, or all of them with {"all": true}."""
+    payload = request.get_json(silent=True) or {}
+    if payload.get("all"):
+        _save_hidden_conversations(set())
+        return jsonify({"status": "all_unhidden", "hidden_count": 0})
+    channel = str(payload.get("channel") or "").strip()
+    contact_id = str(payload.get("contact_id") or "").strip()
+    if not channel or not contact_id:
+        return jsonify({"error": "channel and contact_id are required (or pass all=true)"}), 400
+    hidden = _get_hidden_conversations()
+    hidden.discard(_conv_key(channel, contact_id))
+    _save_hidden_conversations(hidden)
+    return jsonify({"status": "unhidden", "hidden_count": len(hidden)})
 
 
 @app.route("/api/conversations/messages", methods=["GET"])
@@ -1006,7 +1075,9 @@ def api_conversation_messages():
             return jsonify({"error": "contact_id is required"}), 400
         history = supabase_bridge.get_instagram_history(contact_id)
         # Full-history scan on open catches a number shared in an older thread
-        # that fell outside the list view's recent-message batch.
+        # that fell outside the list view's recent-message batch. Falls back to
+        # the default client so capture works even under "All clients".
+        capture_client_id = _default_capture_client_id(capture_client_id)
         if capture_client_id:
             num = phone_capture.capture_from_history(history)
             if num:

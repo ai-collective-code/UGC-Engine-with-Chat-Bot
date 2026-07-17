@@ -54,6 +54,9 @@
         <button class="nav-item" data-section="langlab" id="nav-langlab">
           <span class="nav-icon">🌐</span> Language Lab
         </button>
+        <button class="nav-item" data-section="translator" id="nav-translator">
+          <span class="nav-icon">🌏</span> Translator
+        </button>
         <button class="nav-item" data-section="creators" id="nav-creators">
           <span class="nav-icon">👤</span> Creators
         </button>
@@ -386,6 +389,45 @@
               <span class="panel-hint" id="ll-sens-status"></span>
             </div>
             <div id="ll-sens-result" class="ll-result"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══ TRANSLATOR (dedicated messaging translator) ═══ -->
+      <section id="section-translator" class="section" hidden>
+        <div class="panel">
+          <div class="panel-head">
+            <h2>🌏 Translator</h2>
+            <span class="panel-hint">Message any regional creator in their own language. <b>Compose</b> your outreach into their language (romanized, ready to paste into a DM), or <b>Understand</b> a reply they sent you — with a tip on how to answer in the same voice. Powered by the same 20-language engine as Language Lab.</span>
+          </div>
+          <div class="tr-tabs">
+            <button class="tr-tab active" data-trtab="compose">📝 Compose · You → Creator</button>
+            <button class="tr-tab" data-trtab="understand">💡 Understand · Creator → You</button>
+          </div>
+
+          <!-- Compose: your message → creator's language -->
+          <div class="tr-pane" data-trpane="compose">
+            <span class="panel-hint">Write your message, tap a language (or pick from the list), and translate.</span>
+            <textarea id="tr-compose-input" class="spinner-textarea" rows="3" placeholder="e.g. Hi! We love your content and would like to collaborate with you for our brand."></textarea>
+            <div class="tr-quicklang" id="tr-quicklang"></div>
+            <div class="spinner-controls">
+              <label>Creator's language:
+                <select id="tr-compose-lang"></select>
+              </label>
+              <label class="checkbox-label"><input type="checkbox" id="tr-compose-romanized" checked> Romanized (English letters)</label>
+              <button class="btn btn-primary" id="tr-compose-btn">Translate →</button>
+              <span class="panel-hint" id="tr-compose-status"></span>
+            </div>
+            <div id="tr-compose-result" class="ll-result"></div>
+          </div>
+
+          <!-- Understand: creator's reply → English + how they write -->
+          <div class="tr-pane" data-trpane="understand" hidden>
+            <span class="panel-hint">Paste the creator's message (any Indian language — native script or romanized). Get the English meaning plus how they're writing, so you know how to reply.</span>
+            <textarea id="tr-understand-input" class="spinner-textarea" rows="3" placeholder="e.g. dada apnar reel ta darun hoyeche, amar sathe collab korben?"></textarea>
+            <button class="btn btn-primary" id="tr-understand-btn">Understand →</button>
+            <span class="panel-hint" id="tr-understand-status"></span>
+            <div id="tr-understand-result" class="ll-result"></div>
           </div>
         </div>
       </section>

@@ -1,24 +1,44 @@
 # -*- coding: utf-8 -*-
 """
-Single local SQLite database for the whole engine. Every client's config,
-outreach queue, negotiation conversation, and human-action event lives
-here -- it's what backend/app.py (the monitoring dashboard) reads from,
-and what the CLI scripts and negotiator webhooks write to as they run.
+Central database for the whole engine. Every client's config, outreach queue,
+negotiation conversation, and human-action event lives here -- it's what
+backend/app.py (the monitoring dashboard) reads from, and what the CLI scripts
+and negotiator webhooks write to as they run.
 
-File lives at data/ugc_engine.db, created on first use. Override with the
-UGC_DB_PATH env var (handy for tests).
+Backed by PostgreSQL (psycopg2). All tables live in a dedicated `ugc` schema so
+they stay isolated from anything else sharing the same database (e.g. the
+Instagram chatbot's tables, or an unrelated app's) -- no name collisions.
+
+Config:
+  DATABASE_URL -- PostgreSQL connection string (required). On Render, use the
+                  INTERNAL URL when this service runs on Render (same region as
+                  the DB); use the EXTERNAL URL for local development.
+  PGSSLMODE    -- libpq sslmode, default "require" (Render encrypts both its
+                  internal and external endpoints). Set to "disable" only if
+                  connecting to a local Postgres without SSL.
+
+Implementation note: get_conn() returns a thin wrapper that mimics the small
+slice of the sqlite3.Connection API this module used (.execute/.executemany/
+.executescript, context-manager commit) and rewrites `?` placeholders to `%s`,
+so the query bodies below read the same as they did under SQLite.
 """
 import json
 import os
-import sqlite3
 import urllib.parse
 
-_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_PATH = os.environ.get("UGC_DB_PATH", os.path.join(_REPO_ROOT, "data", "ugc_engine.db"))
+import psycopg2
+from psycopg2.pool import ThreadedConnectionPool
+from psycopg2.extras import RealDictCursor
 
-SCHEMA = """
+DATABASE_URL = os.environ.get("DATABASE_URL")
+SCHEMA_NAME = "ugc"
+_SSLMODE = os.environ.get("PGSSLMODE", "require")
+
+SCHEMA = f"""
+CREATE SCHEMA IF NOT EXISTS {SCHEMA_NAME};
+
 CREATE TABLE IF NOT EXISTS clients (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id SERIAL PRIMARY KEY,
     client_key TEXT UNIQUE NOT NULL,
     client_name TEXT NOT NULL,
     campaign_name TEXT,
@@ -34,11 +54,11 @@ CREATE TABLE IF NOT EXISTS clients (
     instagram_enabled INTEGER DEFAULT 0,
     facebook_enabled INTEGER DEFAULT 0,
     compliance_note TEXT,
-    created_at TEXT DEFAULT (datetime('now'))
+    created_at TEXT DEFAULT to_char((now() AT TIME ZONE 'UTC'), 'YYYY-MM-DD HH24:MI:SS')
 );
 
 CREATE TABLE IF NOT EXISTS creators (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id SERIAL PRIMARY KEY,
     client_id INTEGER NOT NULL REFERENCES clients(id),
     full_name TEXT,
     username TEXT,
@@ -62,29 +82,29 @@ CREATE TABLE IF NOT EXISTS creators (
     qc_verdict TEXT,
     qc_data TEXT,
     notes TEXT,
-    created_at TEXT DEFAULT (datetime('now')),
+    created_at TEXT DEFAULT to_char((now() AT TIME ZONE 'UTC'), 'YYYY-MM-DD HH24:MI:SS'),
     UNIQUE(client_id, username, channel)
 );
 
 CREATE TABLE IF NOT EXISTS messages (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id SERIAL PRIMARY KEY,
     client_id INTEGER NOT NULL REFERENCES clients(id),
     channel TEXT NOT NULL,
     contact_id TEXT NOT NULL,
     role TEXT NOT NULL,
     content TEXT NOT NULL,
-    created_at TEXT DEFAULT (datetime('now'))
+    created_at TEXT DEFAULT to_char((now() AT TIME ZONE 'UTC'), 'YYYY-MM-DD HH24:MI:SS')
 );
 
 CREATE TABLE IF NOT EXISTS human_actions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id SERIAL PRIMARY KEY,
     client_id INTEGER,
     channel TEXT,
     contact_id TEXT,
     event TEXT NOT NULL,
     detail TEXT,
     resolved INTEGER DEFAULT 0,
-    created_at TEXT DEFAULT (datetime('now'))
+    created_at TEXT DEFAULT to_char((now() AT TIME ZONE 'UTC'), 'YYYY-MM-DD HH24:MI:SS')
 );
 
 CREATE TABLE IF NOT EXISTS settings (
@@ -93,7 +113,7 @@ CREATE TABLE IF NOT EXISTS settings (
 );
 
 CREATE TABLE IF NOT EXISTS dealers (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id SERIAL PRIMARY KEY,
     client_id INTEGER NOT NULL REFERENCES clients(id),
     dealer_name TEXT,
     pincode TEXT,
@@ -101,17 +121,17 @@ CREATE TABLE IF NOT EXISTS dealers (
     state TEXT,
     phone TEXT,
     address TEXT,
-    created_at TEXT DEFAULT (datetime('now')),
+    created_at TEXT DEFAULT to_char((now() AT TIME ZONE 'UTC'), 'YYYY-MM-DD HH24:MI:SS'),
     UNIQUE(client_id, dealer_name, pincode)
 );
 
 CREATE TABLE IF NOT EXISTS profile_analyses (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id SERIAL PRIMARY KEY,
     client_id INTEGER REFERENCES clients(id),
     username TEXT NOT NULL,
     profile_data TEXT,
     analysis_data TEXT,
-    created_at TEXT DEFAULT (datetime('now'))
+    created_at TEXT DEFAULT to_char((now() AT TIME ZONE 'UTC'), 'YYYY-MM-DD HH24:MI:SS')
 );
 
 -- Creator reputation history (roadmap point 50). One row per recorded event.
@@ -119,23 +139,106 @@ CREATE TABLE IF NOT EXISTS profile_analyses (
 -- across clients/campaigns -- a scammer flagged on one brand is flagged on all.
 -- event: 'good' | 'late' | 'ghosted' | 'fake_content' | 'scam' | 'note'
 CREATE TABLE IF NOT EXISTS creator_reputation (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id SERIAL PRIMARY KEY,
     username TEXT NOT NULL,
     client_id INTEGER REFERENCES clients(id),
     event TEXT NOT NULL,
     detail TEXT,
-    created_at TEXT DEFAULT (datetime('now'))
+    created_at TEXT DEFAULT to_char((now() AT TIME ZONE 'UTC'), 'YYYY-MM-DD HH24:MI:SS')
 );
 CREATE INDEX IF NOT EXISTS idx_reputation_username ON creator_reputation(username);
 """
 
 
+def _translate(sql):
+    """Rewrite sqlite3-style `?` placeholders to psycopg2's `%s`. None of this
+    module's queries contain a literal `%` or `?`, so a plain replace is safe."""
+    return sql.replace("?", "%s")
+
+
+class _PgConn:
+    """Minimal sqlite3.Connection look-alike over a pooled psycopg2 connection.
+
+    Supports the exact surface this module uses: .execute()/.executemany()
+    returning a cursor, .executescript(), .commit(), .scalar(), and use as a
+    context manager (commit on clean exit, rollback on error), releasing the
+    underlying connection back to the pool afterwards.
+    """
+
+    def __init__(self, raw):
+        self._raw = raw
+
+    def execute(self, sql, params=None):
+        cur = self._raw.cursor(cursor_factory=RealDictCursor)
+        cur.execute(_translate(sql), params if params else None)
+        return cur
+
+    def executemany(self, sql, seq_of_params):
+        cur = self._raw.cursor()
+        cur.executemany(_translate(sql), list(seq_of_params))
+        return cur
+
+    def executescript(self, sql):
+        # Multi-statement DDL, no parameters -- sent verbatim (no placeholder
+        # translation; the schema contains none).
+        cur = self._raw.cursor()
+        cur.execute(sql)
+        return cur
+
+    def scalar(self, sql, params=None):
+        """First column of the first row (for COUNT(*)-style queries)."""
+        row = self.execute(sql, params).fetchone()
+        if row is None:
+            return None
+        return next(iter(row.values()))
+
+    def commit(self):
+        self._raw.commit()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        try:
+            if exc_type is None:
+                self._raw.commit()
+            else:
+                self._raw.rollback()
+        finally:
+            _put_conn(self._raw)
+        return False
+
+
+_pool = None
+
+
+def _get_pool():
+    global _pool
+    if _pool is None:
+        if not DATABASE_URL:
+            raise RuntimeError(
+                "DATABASE_URL is not set -- add your PostgreSQL connection string to .env"
+            )
+        # search_path pins every unqualified table name to the `ugc` schema
+        # (with public as a fallback for built-ins), so this engine's tables
+        # never collide with anything else in a shared database.
+        _pool = ThreadedConnectionPool(
+            1,
+            10,
+            dsn=DATABASE_URL,
+            sslmode=_SSLMODE,
+            options=f"-c search_path={SCHEMA_NAME},public",
+        )
+    return _pool
+
+
+def _put_conn(raw):
+    if _pool is not None:
+        _pool.putconn(raw)
+
+
 def get_conn():
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    return conn
+    return _PgConn(_get_pool().getconn())
 
 
 # The platforms a creator can be sourced from. WhatsApp is NOT a source --
@@ -155,30 +258,9 @@ def init_db():
 
 
 def _migrate(conn):
-    """Idempotent, safe schema evolution for databases created before the
-    multi-platform funnel landed. Runs on every startup; a no-op once applied."""
-    cols = [r["name"] for r in conn.execute("PRAGMA table_info(creators)").fetchall()]
-    if "source_platform" not in cols:
-        conn.execute("ALTER TABLE creators ADD COLUMN source_platform TEXT")
-    if "ops_stage" not in cols:
-        conn.execute("ALTER TABLE creators ADD COLUMN ops_stage TEXT DEFAULT ''")
-    if "content_url" not in cols:
-        conn.execute("ALTER TABLE creators ADD COLUMN content_url TEXT")
-        conn.execute("ALTER TABLE creators ADD COLUMN qc_score INTEGER")
-        conn.execute("ALTER TABLE creators ADD COLUMN qc_verdict TEXT")
-        conn.execute("ALTER TABLE creators ADD COLUMN qc_data TEXT")
-    if "profile_type" not in cols:
-        conn.execute("ALTER TABLE creators ADD COLUMN profile_type TEXT DEFAULT 'individual'")
-        # Backfill using the same heuristic new imports use, so upgrading an
-        # existing database doesn't leave every prior row unclassified.
-        try:
-            import outreach_pipeline
-            for r in conn.execute("SELECT id, full_name, username, caption_sample FROM creators").fetchall():
-                ptype = outreach_pipeline.classify_profile_type(r["full_name"], r["username"], r["caption_sample"])
-                conn.execute("UPDATE creators SET profile_type=? WHERE id=?", (ptype, r["id"]))
-        except Exception as e:
-            print(f"[local_db] warning: could not backfill profile_type: {e}")
-
+    """Idempotent data-normalization, safe to run on every startup. On a fresh
+    database these are all no-ops; they only do work if legacy rows are present
+    (e.g. data imported from the old SQLite engine)."""
     # Legacy channel 'instagram_fb' becomes the 'instagram' source so re-uploads
     # update the same row instead of creating a duplicate under a new channel name.
     conn.execute("UPDATE creators SET channel='instagram' WHERE channel='instagram_fb'")
@@ -196,9 +278,8 @@ def _migrate(conn):
         "WHERE source_platform IS NULL OR source_platform = ''"
     )
 
-    # Backfill whatsapp_link for rows that have a phone but no link -- e.g. the
-    # source rows whose derived whatsapp duplicate (which held the link) was
-    # just removed above. The link = wa.me/<91-phone>?text=<message>.
+    # Backfill whatsapp_link for rows that have a phone but no link. The link =
+    # wa.me/<91-phone>?text=<message>.
     to_link = conn.execute(
         "SELECT id, phone, personalized_message FROM creators "
         "WHERE phone IS NOT NULL AND phone != '' "
@@ -246,10 +327,10 @@ def upsert_client_from_config(config, client_key):
         cols = ["client_key"] + list(fields.keys())
         placeholders = ", ".join(["?"] * len(cols))
         cur = conn.execute(
-            f"INSERT INTO clients ({', '.join(cols)}) VALUES ({placeholders})",
+            f"INSERT INTO clients ({', '.join(cols)}) VALUES ({placeholders}) RETURNING id",
             [client_key] + list(fields.values()),
         )
-        return cur.lastrowid
+        return cur.fetchone()["id"]
 
 
 def get_client_id_by_key(client_key):
@@ -304,8 +385,8 @@ def upsert_whatsapp_contact(client_id, username, full_name, phone, whatsapp_link
             "profile_link, channel, source_platform) VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(client_id, username, channel) DO UPDATE SET "
             "phone=excluded.phone, whatsapp_link=excluded.whatsapp_link, "
-            "full_name=CASE WHEN full_name IS NULL OR full_name='' "
-            "THEN excluded.full_name ELSE full_name END",
+            "full_name=CASE WHEN creators.full_name IS NULL OR creators.full_name='' "
+            "THEN excluded.full_name ELSE creators.full_name END",
             (client_id, username, full_name, phone, whatsapp_link,
              profile_link, channel, source_platform),
         )
@@ -530,27 +611,25 @@ def get_stats(client_id=None):
         client_clause = " WHERE client_id=?" if client_id else ""
         params = (client_id,) if client_id else ()
 
-        total_clients = conn.execute("SELECT COUNT(*) FROM clients").fetchone()[0]
-        total_creators = conn.execute(f"SELECT COUNT(*) FROM creators{client_clause}", params).fetchone()[0]
+        total_clients = conn.scalar("SELECT COUNT(*) FROM clients")
+        total_creators = conn.scalar(f"SELECT COUNT(*) FROM creators{client_clause}", params)
         whatsapp_clause = client_clause + (" AND" if client_clause else " WHERE") + " phone IS NOT NULL AND phone != ''"
-        whatsapp_ready = conn.execute(f"SELECT COUNT(*) FROM creators{whatsapp_clause}", params).fetchone()[0]
-        active_conversations = conn.execute(
+        whatsapp_ready = conn.scalar(f"SELECT COUNT(*) FROM creators{whatsapp_clause}", params)
+        active_conversations = conn.scalar(
             f"SELECT COUNT(DISTINCT channel || ':' || contact_id) FROM messages{client_clause}", params
-        ).fetchone()[0]
+        )
         agreed_clause = client_clause + (" AND" if client_clause else " WHERE") + " event='DEAL_AGREED'"
-        deals_agreed = conn.execute(f"SELECT COUNT(*) FROM human_actions{agreed_clause}", params).fetchone()[0]
+        deals_agreed = conn.scalar(f"SELECT COUNT(*) FROM human_actions{agreed_clause}", params)
         blocked_clause = client_clause + (" AND" if client_clause else " WHERE") + " event='CEILING_BLOCKED'"
-        ceiling_blocked = conn.execute(f"SELECT COUNT(*) FROM human_actions{blocked_clause}", params).fetchone()[0]
+        ceiling_blocked = conn.scalar(f"SELECT COUNT(*) FROM human_actions{blocked_clause}", params)
         pending_clause = client_clause + (" AND" if client_clause else " WHERE") + " resolved=0"
-        pending_human_actions = conn.execute(
-            f"SELECT COUNT(*) FROM human_actions{pending_clause}", params
-        ).fetchone()[0]
+        pending_human_actions = conn.scalar(f"SELECT COUNT(*) FROM human_actions{pending_clause}", params)
         # Pipeline funnel: "sent" = any status past the starting point;
         # "replied" = the creator actually responded, whatever happened after.
         sent_clause = client_clause + (" AND" if client_clause else " WHERE") + " status != 'Not Sent'"
-        sent_count = conn.execute(f"SELECT COUNT(*) FROM creators{sent_clause}", params).fetchone()[0]
+        sent_count = conn.scalar(f"SELECT COUNT(*) FROM creators{sent_clause}", params)
         replied_clause = client_clause + (" AND" if client_clause else " WHERE") + " status IN ('Replied', 'Converted')"
-        replied_count = conn.execute(f"SELECT COUNT(*) FROM creators{replied_clause}", params).fetchone()[0]
+        replied_count = conn.scalar(f"SELECT COUNT(*) FROM creators{replied_clause}", params)
 
     return {
         "total_clients": total_clients,
@@ -761,4 +840,3 @@ def list_reputation(username):
             (username,),
         ).fetchall()
     return [dict(r) for r in rows]
-

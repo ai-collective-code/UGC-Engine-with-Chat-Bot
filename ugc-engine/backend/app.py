@@ -1174,6 +1174,6 @@ if __name__ == "__main__":
     # should front this with gunicorn (see requirements.txt) rather than Flask's
     # dev server; this block is the local-dev / fallback entrypoint.
     port = int(os.environ.get("PORT", 8000))
-    print(f"Dashboard DB: {local_db.DB_PATH}")
+    print("Dashboard DB: PostgreSQL (schema 'ugc')")
     print(f"Starting dashboard on http://0.0.0.0:{port}")
     app.run(host="0.0.0.0", port=port, debug=False)

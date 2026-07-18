@@ -22,7 +22,7 @@ export default function AnalyticsError({
           <AlertTriangle className="h-5 w-5 text-red-400" />
         </div>
         <h2 className="text-sm font-medium text-white">Couldn&apos;t load analytics</h2>
-        <p className="text-xs text-white/40">{error.message || "Something went wrong while fetching data from Supabase."}</p>
+        <p className="text-xs text-white/40">{error.message || "Something went wrong while fetching data from the database."}</p>
         <Button size="sm" onClick={reset} className="mt-2">
           Try again
         </Button>

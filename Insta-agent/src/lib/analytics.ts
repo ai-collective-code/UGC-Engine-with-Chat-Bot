@@ -1,4 +1,4 @@
-import { supabase } from "@/lib/supabase";
+import { query, queryOne } from "@/lib/db";
 
 export interface DashboardMetrics {
   totalInteractions: number;
@@ -27,33 +27,28 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 export async function getDashboardMetrics(): Promise<DashboardMetrics> {
   const since24h = new Date(Date.now() - DAY_MS).toISOString();
 
-  const [totalRes, last24hRes, responseTimeRes] = await Promise.all([
-    supabase
-      .from("instagram_messages")
-      .select("id", { count: "exact", head: true })
-      .eq("role", "user"),
-    supabase
-      .from("instagram_messages")
-      .select("id", { count: "exact", head: true })
-      .eq("role", "user")
-      .gte("created_at", since24h),
+  const [totalRow, last24hRow, responseTimeRows] = await Promise.all([
+    queryOne<{ count: number }>(
+      `SELECT count(*)::int AS count FROM instagram_messages WHERE role = 'user'`
+    ),
+    queryOne<{ count: number }>(
+      `SELECT count(*)::int AS count FROM instagram_messages
+       WHERE role = 'user' AND created_at >= $1`,
+      [since24h]
+    ),
     // Sample the most recent messages to estimate response latency; a full
     // table scan isn't worth it for a dashboard metric.
-    supabase
-      .from("instagram_messages")
-      .select("conversation_id, role, created_at")
-      .order("created_at", { ascending: false })
-      .limit(300),
+    query<{ conversation_id: string; role: string; created_at: string }>(
+      `SELECT conversation_id, role, created_at FROM instagram_messages
+       ORDER BY created_at DESC
+       LIMIT 300`
+    ),
   ]);
 
-  if (totalRes.error) throw new Error(totalRes.error.message);
-  if (last24hRes.error) throw new Error(last24hRes.error.message);
-  if (responseTimeRes.error) throw new Error(responseTimeRes.error.message);
-
   return {
-    totalInteractions: totalRes.count ?? 0,
-    last24hInteractions: last24hRes.count ?? 0,
-    avgResponseTimeSeconds: computeAvgResponseTime(responseTimeRes.data ?? []),
+    totalInteractions: totalRow?.count ?? 0,
+    last24hInteractions: last24hRow?.count ?? 0,
+    avgResponseTimeSeconds: computeAvgResponseTime(responseTimeRows),
   };
 }
 
@@ -93,12 +88,10 @@ export async function getMessageVolume(): Promise<MessageVolumePoint[]> {
   const since = new Date(Date.now() - (days - 1) * DAY_MS);
   since.setHours(0, 0, 0, 0);
 
-  const { data, error } = await supabase
-    .from("instagram_messages")
-    .select("role, created_at")
-    .gte("created_at", since.toISOString());
-
-  if (error) throw new Error(error.message);
+  const data = await query<{ role: string; created_at: string }>(
+    `SELECT role, created_at FROM instagram_messages WHERE created_at >= $1`,
+    [since.toISOString()]
+  );
 
   const buckets = new Map<string, { user: number; assistant: number }>();
   for (let i = 0; i < days; i++) {
@@ -132,24 +125,29 @@ function dateKey(d: Date) {
 }
 
 export async function getRecentActivity(limit = 10): Promise<RecentActivityItem[]> {
-  const { data, error } = await supabase
-    .from("instagram_messages")
-    .select(
-      "id, role, content, created_at, conversation:instagram_conversations(name, username, igsid)"
-    )
-    .order("created_at", { ascending: false })
-    .limit(limit);
+  const rows = await query<{
+    id: string;
+    role: "user" | "assistant";
+    content: string;
+    created_at: string;
+    convo_name: string | null;
+    convo_username: string | null;
+    convo_igsid: string | null;
+  }>(
+    `SELECT m.id, m.role, m.content, m.created_at,
+            c.name AS convo_name, c.username AS convo_username, c.igsid AS convo_igsid
+     FROM instagram_messages m
+     LEFT JOIN instagram_conversations c ON c.id = m.conversation_id
+     ORDER BY m.created_at DESC
+     LIMIT $1`,
+    [limit]
+  );
 
-  if (error) throw new Error(error.message);
-
-  return (data ?? []).map((row) => {
-    const convo = Array.isArray(row.conversation) ? row.conversation[0] : row.conversation;
-    return {
-      id: row.id,
-      role: row.role,
-      content: row.content,
-      createdAt: row.created_at,
-      conversationName: convo?.name || convo?.username || convo?.igsid || "Unknown",
-    };
-  });
+  return rows.map((row) => ({
+    id: row.id,
+    role: row.role,
+    content: row.content,
+    createdAt: row.created_at,
+    conversationName: row.convo_name || row.convo_username || row.convo_igsid || "Unknown",
+  }));
 }

@@ -1,8 +1,10 @@
 import { NextRequest } from "next/server";
 import crypto from "crypto";
-import { supabase } from "@/lib/supabase";
+import { query, queryOne, UNIQUE_VIOLATION } from "@/lib/db";
 import { sendInstagramMessage, fetchInstagramProfile } from "@/lib/instagram";
 import { decide } from "@/lib/flow";
+import { publishUpdate } from "@/lib/realtime";
+import type { Conversation } from "@/lib/types";
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
@@ -102,41 +104,65 @@ export async function POST(request: NextRequest) {
 
 // Find the conversation for this creator, creating it (with profile) on first
 // contact. Returns null only if the row genuinely can't be found or created.
-async function findOrCreateConversation(igsid: string) {
-  const { data: existing } = await supabase
-    .from("instagram_conversations")
-    .select("*")
-    .eq("igsid", igsid)
-    .single();
+async function findOrCreateConversation(igsid: string): Promise<Conversation | null> {
+  const existing = await queryOne<Conversation>(
+    `SELECT * FROM instagram_conversations WHERE igsid = $1`,
+    [igsid]
+  );
 
   if (existing) {
     // Refresh profile; skip the update on Graph failure so a transient error
     // can't wipe stored fields to null.
     const profile = await fetchInstagramProfile(igsid);
     if (profile) {
-      await supabase.from("instagram_conversations").update(profile).eq("id", existing.id);
-      return { ...existing, ...profile };
+      const updated = await queryOne<Conversation>(
+        `UPDATE instagram_conversations
+         SET name = $1, username = $2, profile_pic = $3, follower_count = $4,
+             is_user_follow_business = $5, is_business_follow_user = $6
+         WHERE id = $7
+         RETURNING *`,
+        [
+          profile.name,
+          profile.username,
+          profile.profile_pic,
+          profile.follower_count,
+          profile.is_user_follow_business,
+          profile.is_business_follow_user,
+          existing.id,
+        ]
+      );
+      return updated ?? existing;
     }
     return existing;
   }
 
   const profile = await fetchInstagramProfile(igsid);
-  const { data: created, error } = await supabase
-    .from("instagram_conversations")
-    .insert({ igsid, ...(profile || {}) })
-    .select()
-    .single();
-  if (error) {
-    // Two concurrent first-messages can race the insert — re-select so the
-    // loser of the race still finds the winner's row.
-    const { data: raced } = await supabase
-      .from("instagram_conversations")
-      .select("*")
-      .eq("igsid", igsid)
-      .single();
-    return raced ?? null;
-  }
-  return created;
+  // ON CONFLICT DO NOTHING handles two concurrent first-messages racing the
+  // insert: the loser gets no RETURNING row, and the follow-up SELECT finds the
+  // winner's row.
+  const created = await queryOne<Conversation>(
+    `INSERT INTO instagram_conversations
+       (igsid, name, username, profile_pic, follower_count,
+        is_user_follow_business, is_business_follow_user)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     ON CONFLICT (igsid) DO NOTHING
+     RETURNING *`,
+    [
+      igsid,
+      profile?.name ?? null,
+      profile?.username ?? null,
+      profile?.profile_pic ?? null,
+      profile?.follower_count ?? null,
+      profile?.is_user_follow_business ?? null,
+      profile?.is_business_follow_user ?? null,
+    ]
+  );
+  if (created) return created;
+
+  return queryOne<Conversation>(
+    `SELECT * FROM instagram_conversations WHERE igsid = $1`,
+    [igsid]
+  );
 }
 
 // Store one message; returns "ok", "duplicate" (Meta redelivery / echo of our
@@ -147,18 +173,18 @@ async function storeMessage(
   content: string,
   instagramMsgId?: string
 ): Promise<"ok" | "duplicate" | "store_failed"> {
-  const { error } = await supabase.from("instagram_messages").insert({
-    conversation_id: conversationId,
-    role,
-    content,
-    instagram_msg_id: instagramMsgId,
-  });
-  if (error) {
-    if (error.code === "23505") return "duplicate";
+  try {
+    await queryOne(
+      `INSERT INTO instagram_messages (conversation_id, role, content, instagram_msg_id)
+       VALUES ($1, $2, $3, $4)`,
+      [conversationId, role, content, instagramMsgId ?? null]
+    );
+    return "ok";
+  } catch (error) {
+    if ((error as { code?: string }).code === UNIQUE_VIOLATION) return "duplicate";
     console.error("[webhook] Failed to store message:", error);
     return "store_failed";
   }
-  return "ok";
 }
 
 async function handleMessage(
@@ -178,10 +204,12 @@ async function handleMessage(
     if (stored === "duplicate") return "duplicate";
     if (stored === "store_failed") return "store_failed";
 
-    await supabase
-      .from("instagram_conversations")
-      .update({ updated_at: new Date().toISOString() })
-      .eq("id", conversation.id);
+    await queryOne(
+      `UPDATE instagram_conversations SET updated_at = now() WHERE id = $1`,
+      [conversation.id]
+    );
+    // Push the stored inbound/echo message to any open dashboard immediately.
+    await publishUpdate(conversation.id);
 
     // Echoes (opener / human-sent messages) are stored for context only — the
     // bot never responds to its own or a human's outbound message.
@@ -192,16 +220,17 @@ async function handleMessage(
 
     // Newest 20 messages in chronological order — the just-stored creator
     // message is last, which is what the flow engine expects.
-    const { data: history } = await supabase
-      .from("instagram_messages")
-      .select("role, content")
-      .eq("conversation_id", conversation.id)
-      .order("created_at", { ascending: false })
-      .limit(20);
+    const history = await query<{ role: "user" | "assistant"; content: string }>(
+      `SELECT role, content FROM instagram_messages
+       WHERE conversation_id = $1
+       ORDER BY created_at DESC
+       LIMIT 20`,
+      [conversation.id]
+    );
 
-    const chronological = (history || [])
+    const chronological = history
       .reverse()
-      .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
+      .map((m) => ({ role: m.role, content: m.content }));
 
     const decision = decide(chronological);
 
@@ -218,17 +247,19 @@ async function handleMessage(
       // Store our send WITH the returned message id so the echo of it is deduped.
       const sentMid = (result as { message_id?: string })?.message_id;
       await storeMessage(conversation.id, "assistant", decision.send, sentMid);
-      await supabase
-        .from("instagram_conversations")
-        .update({ updated_at: new Date().toISOString() })
-        .eq("id", conversation.id);
+      await queryOne(
+        `UPDATE instagram_conversations SET updated_at = now() WHERE id = $1`,
+        [conversation.id]
+      );
+      // Push the bot's reply so it appears in the dashboard without a poll wait.
+      await publishUpdate(conversation.id);
     }
 
     if (decision.lock) {
-      await supabase
-        .from("instagram_conversations")
-        .update({ mode: "human" })
-        .eq("id", conversation.id);
+      await queryOne(
+        `UPDATE instagram_conversations SET mode = 'human' WHERE id = $1`,
+        [conversation.id]
+      );
     }
 
     return decision.send ? `replied:${decision.reason}` : `silent:${decision.reason}`;

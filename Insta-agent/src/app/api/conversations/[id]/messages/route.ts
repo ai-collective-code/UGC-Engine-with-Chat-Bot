@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { query } from "@/lib/db";
+import type { Message } from "@/lib/types";
 
 export async function GET(
   _request: NextRequest,
@@ -7,15 +8,16 @@ export async function GET(
 ) {
   const { id } = await params;
 
-  const { data: messages, error } = await supabase
-    .from("instagram_messages")
-    .select("*")
-    .eq("conversation_id", id)
-    .order("created_at", { ascending: true });
-
-  if (error) {
-    return Response.json({ error: error.message }, { status: 500 });
+  try {
+    const messages = await query<Message>(
+      `SELECT * FROM instagram_messages
+       WHERE conversation_id = $1
+       ORDER BY created_at ASC`,
+      [id]
+    );
+    return Response.json(messages);
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : "Failed to load messages";
+    return Response.json({ error: detail }, { status: 500 });
   }
-
-  return Response.json(messages);
 }

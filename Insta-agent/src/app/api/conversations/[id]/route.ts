@@ -1,5 +1,7 @@
 import { NextRequest } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { queryOne } from "@/lib/db";
+import { publishUpdate } from "@/lib/realtime";
+import type { Conversation } from "@/lib/types";
 
 export async function PATCH(
   request: NextRequest,
@@ -13,22 +15,27 @@ export async function PATCH(
     return Response.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  // Require a valid mode outright — `update({ mode: undefined })` would reach
-  // PostgREST as an empty update and surface as a confusing 500.
+  // Require a valid mode outright so a bad value can't reach the UPDATE.
   if (!["agent", "human"].includes(body.mode)) {
     return Response.json({ error: "mode must be 'agent' or 'human'" }, { status: 400 });
   }
 
-  const { data, error } = await supabase
-    .from("instagram_conversations")
-    .update({ mode: body.mode })
-    .eq("id", id)
-    .select()
-    .single();
-
-  if (error) {
-    return Response.json({ error: error.message }, { status: 500 });
+  try {
+    const updated = await queryOne<Conversation>(
+      `UPDATE instagram_conversations
+       SET mode = $1, updated_at = now()
+       WHERE id = $2
+       RETURNING *`,
+      [body.mode, id]
+    );
+    if (!updated) {
+      return Response.json({ error: "Conversation not found" }, { status: 404 });
+    }
+    // Push so the AI/Human badge flips on every open dashboard immediately.
+    await publishUpdate(id);
+    return Response.json(updated);
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : "Failed to update conversation";
+    return Response.json({ error: detail }, { status: 500 });
   }
-
-  return Response.json(data);
 }

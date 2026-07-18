@@ -1,18 +1,16 @@
 "use client";
 
-import { useEffect, useState, useRef, useCallback, useMemo } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import Image from "next/image";
-import { createClient } from "@supabase/supabase-js";
+import * as Ably from "ably";
 import type { ConversationWithLastMessage, Message } from "@/lib/types";
 
-export default function Dashboard() {
-  const supabase = useMemo(() => {
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-    if (!url || !key) return null;
-    return createClient(url, key);
-  }, []);
+// Instant updates come from Ably push (see /api/ably-auth + lib/realtime).
+// Polling is kept only as a slow safety net in case the realtime token or
+// connection drops, or ABLY_API_KEY isn't configured.
+const POLL_INTERVAL_MS = 15000;
 
+export default function Dashboard() {
   const [conversations, setConversations] = useState<ConversationWithLastMessage[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -23,6 +21,13 @@ export default function Dashboard() {
   // Guards against a slow fetch for conversation A landing after the user
   // already clicked conversation B and overwriting B's thread with A's.
   const activeFetchIdRef = useRef<string | null>(null);
+  // Latest selected id, read by the Ably handler and the poll tick so neither
+  // has to be in their effect deps (which would re-open the realtime connection
+  // on every conversation switch).
+  const selectedIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    selectedIdRef.current = selectedId;
+  }, [selectedId]);
 
   const selected = conversations.find((c) => c.id === selectedId);
 
@@ -37,7 +42,11 @@ export default function Dashboard() {
         return;
       }
       setErrorBanner(null);
-      setConversations(data);
+      // Keep the previous array reference when nothing changed so a poll tick
+      // doesn't re-render the whole list (and lose hover/scroll state).
+      setConversations((prev) =>
+        JSON.stringify(prev) === JSON.stringify(data) ? prev : data
+      );
     } catch {
       setErrorBanner("Server unreachable — retrying on next update");
     }
@@ -53,7 +62,11 @@ export default function Dashboard() {
         setErrorBanner(data?.error || "Failed to load messages");
         return;
       }
-      setMessages(data);
+      // Skip the state update (and the scroll-to-bottom it triggers) when the
+      // polled thread is identical to what's already rendered.
+      setMessages((prev) =>
+        JSON.stringify(prev) === JSON.stringify(data) ? prev : data
+      );
     } catch {
       if (activeFetchIdRef.current === convoId) {
         setErrorBanner("Failed to load messages");
@@ -73,35 +86,56 @@ export default function Dashboard() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // Instant push via Ably: the server publishes an "update" with the changed
+  // conversation id, and we re-fetch from the DB (single source of truth). The
+  // connection is opened once — selectedId is read from a ref so switching
+  // conversations doesn't tear it down and reconnect.
   useEffect(() => {
-    if (!supabase) return;
-    const channel = supabase
-      .channel("realtime-instagram-messages")
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "instagram_messages" },
-        (payload) => {
-          const newMsg = payload.new as Message;
-          if (newMsg.conversation_id === selectedId) {
-            setMessages((prev) => {
-              if (prev.some((m) => m.id === newMsg.id)) return prev;
-              return [...prev, newMsg];
-            });
-          }
-          fetchConversations();
-        }
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "instagram_conversations" },
-        () => fetchConversations()
-      )
-      .subscribe();
+    let client: Ably.Realtime | null = null;
+    try {
+      client = new Ably.Realtime({ authUrl: "/api/ably-auth" });
+    } catch {
+      return; // realtime unavailable — the safety-net poll below still runs
+    }
+    const channel = client.channels.get("instagram-dm");
+    const onUpdate = (msg: Ably.Message) => {
+      const convoId = (msg.data as { conversationId?: string })?.conversationId;
+      fetchConversations();
+      if (convoId && convoId === selectedIdRef.current) {
+        fetchMessages(selectedIdRef.current);
+      }
+    };
+    channel.subscribe("update", onUpdate);
 
     return () => {
-      supabase?.removeChannel(channel);
+      channel.unsubscribe("update", onUpdate);
+      client?.close();
     };
-  }, [selectedId, fetchConversations, supabase]);
+  }, [fetchConversations, fetchMessages]);
+
+  // Slow safety-net poll in case the realtime token/connection drops or Ably
+  // isn't configured. Pauses while the tab is hidden; refreshes on refocus.
+  useEffect(() => {
+    let cancelled = false;
+
+    const tick = () => {
+      if (cancelled || document.hidden) return;
+      fetchConversations();
+      if (selectedIdRef.current) fetchMessages(selectedIdRef.current);
+    };
+
+    const interval = setInterval(tick, POLL_INTERVAL_MS);
+    const onVisibility = () => {
+      if (!document.hidden) tick();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [fetchConversations, fetchMessages]);
 
   async function toggleMode() {
     if (!selected) return;

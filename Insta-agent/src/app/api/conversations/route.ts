@@ -1,31 +1,25 @@
-import { supabase } from "@/lib/supabase";
+import { query } from "@/lib/db";
+import type { ConversationWithLastMessage } from "@/lib/types";
 
 export async function GET() {
-  const { data: conversations, error } = await supabase
-    .from("instagram_conversations")
-    .select("*")
-    .order("updated_at", { ascending: false });
-
-  if (error) {
-    return Response.json({ error: error.message }, { status: 500 });
+  try {
+    // One query instead of N+1: a LATERAL subquery grabs each conversation's
+    // most-recent message content inline, ordered newest-conversation-first.
+    const rows = await query<ConversationWithLastMessage>(
+      `SELECT c.*, lm.content AS last_message
+       FROM instagram_conversations c
+       LEFT JOIN LATERAL (
+         SELECT content
+         FROM instagram_messages m
+         WHERE m.conversation_id = c.id
+         ORDER BY m.created_at DESC
+         LIMIT 1
+       ) lm ON true
+       ORDER BY c.updated_at DESC`
+    );
+    return Response.json(rows);
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : "Failed to load conversations";
+    return Response.json({ error: detail }, { status: 500 });
   }
-
-  // Fetch last message for each conversation
-  const withLastMessage = await Promise.all(
-    (conversations || []).map(async (convo) => {
-      const { data: messages } = await supabase
-        .from("instagram_messages")
-        .select("content, role, created_at")
-        .eq("conversation_id", convo.id)
-        .order("created_at", { ascending: false })
-        .limit(1);
-
-      return {
-        ...convo,
-        last_message: messages?.[0]?.content || null,
-      };
-    })
-  );
-
-  return Response.json(withLastMessage);
 }

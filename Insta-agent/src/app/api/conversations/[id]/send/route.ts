@@ -1,7 +1,9 @@
 import { NextRequest } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { queryOne } from "@/lib/db";
 import { sendInstagramMessage } from "@/lib/instagram";
 import { checkSendRate, recordSend } from "@/lib/rate-limiter";
+import { publishUpdate } from "@/lib/realtime";
+import type { Conversation, Message } from "@/lib/types";
 
 export async function POST(
   request: NextRequest,
@@ -33,13 +35,18 @@ export async function POST(
   }
 
   // Get conversation to find igsid
-  const { data: conversation, error: convoError } = await supabase
-    .from("instagram_conversations")
-    .select("igsid")
-    .eq("id", id)
-    .single();
+  let conversation: Pick<Conversation, "igsid"> | null;
+  try {
+    conversation = await queryOne<Pick<Conversation, "igsid">>(
+      `SELECT igsid FROM instagram_conversations WHERE id = $1`,
+      [id]
+    );
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : "Database error";
+    return Response.json({ error: detail }, { status: 500 });
+  }
 
-  if (convoError || !conversation) {
+  if (!conversation) {
     return Response.json({ error: "Conversation not found" }, { status: 404 });
   }
 
@@ -54,26 +61,23 @@ export async function POST(
   }
   recordSend(id);
 
-  // Store in DB
-  const { data: msg, error: msgError } = await supabase
-    .from("instagram_messages")
-    .insert({
-      conversation_id: id,
-      role: "assistant",
-      content: message,
-    })
-    .select()
-    .single();
-
-  if (msgError) {
-    return Response.json({ error: msgError.message }, { status: 500 });
+  // Store in DB and bump the conversation timestamp.
+  try {
+    const msg = await queryOne<Message>(
+      `INSERT INTO instagram_messages (conversation_id, role, content)
+       VALUES ($1, 'assistant', $2)
+       RETURNING *`,
+      [id, message]
+    );
+    await queryOne(
+      `UPDATE instagram_conversations SET updated_at = now() WHERE id = $1`,
+      [id]
+    );
+    // Push so other open dashboards see the operator's message instantly.
+    await publishUpdate(id);
+    return Response.json(msg);
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : "Failed to store message";
+    return Response.json({ error: detail }, { status: 500 });
   }
-
-  // Update conversation timestamp
-  await supabase
-    .from("instagram_conversations")
-    .update({ updated_at: new Date().toISOString() })
-    .eq("id", id);
-
-  return Response.json(msg);
 }

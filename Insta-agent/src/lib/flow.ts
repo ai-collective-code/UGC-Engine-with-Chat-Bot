@@ -107,11 +107,16 @@ const ROMAN_HINTS: Record<Exclude<Lang, "en">, string[]> = {
     "haan", "nahi", "hai", "hain", "kya", "aap", "hum", "karunga", "karungi",
     "chahiye", "bhej", "kripya", "dhanyavaad", "theek", "thik", "bilkul",
     "mujhe", "mera", "kar", "denge", "chalega", "bahut", "acha", "accha",
+    "aapko", "aapka", "aapke", "humein", "chahte", "banane", "dena", "kaam",
+    "liye", "karenge", "raha", "rahe", "sakta", "sakte", "wala", "wale",
   ],
   bn: [
     "ami", "apni", "apnar", "korbo", "korchi", "chai", "kore", "hobe", "hae",
     "hyan", "obosshoi", "dhonnobad", "doya", "jonno", "kemon", "bananor",
     "ache", "achhe", "thik ache", "darun", "korben",
+    "amader", "amar", "tomar", "niye", "korte", "korar", "koreche", "kajti",
+    "kaj", "sathe", "ekta", "icche", "prokash", "achi", "achhi", "moto",
+    "holo", "bolchi", "theke", "pathate", "jogajog", "bhalo", "valo", "khub",
   ],
 };
 

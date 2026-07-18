@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import crypto from "crypto";
 import { query, queryOne, UNIQUE_VIOLATION } from "@/lib/db";
-import { sendInstagramMessage, fetchInstagramProfile } from "@/lib/instagram";
+import { sendInstagramMessage, fetchInstagramProfile, fetchThreadOpener } from "@/lib/instagram";
 import { decide } from "@/lib/flow";
 import { publishUpdate } from "@/lib/realtime";
 import type { Conversation } from "@/lib/types";
@@ -232,7 +232,20 @@ async function handleMessage(
       .reverse()
       .map((m) => ({ role: m.role, content: m.content }));
 
-    const decision = decide(chronological);
+    // If no assistant message is stored yet, the manual opener's echo was never
+    // captured, so the flow engine would fall back to guessing the language from
+    // the creator's (often short, ambiguous) reply — and default to English.
+    // Pull the real opener from the Graph API and prepend it so the reply goes
+    // out in the opener's language. Only needed on the first reply.
+    let flowHistory = chronological;
+    if (!chronological.some((m) => m.role === "assistant")) {
+      const opener = await fetchThreadOpener(igsid);
+      if (opener) {
+        flowHistory = [{ role: "assistant" as const, content: opener }, ...chronological];
+      }
+    }
+
+    const decision = decide(flowHistory);
 
     if (decision.capturedPhone) {
       // The number is also the creator's last message in the transcript; log it

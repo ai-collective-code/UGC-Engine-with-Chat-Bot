@@ -46,6 +46,46 @@ export async function fetchInstagramProfile(igsid: string): Promise<InstagramPro
   }
 }
 
+// Fetch the opener of a creator's thread straight from the Graph API. In an
+// outreach conversation the OLDEST message is always the manually-sent opener,
+// written in the creator's language. We use it to detect the conversation's
+// language even when that opener's webhook echo was never stored (e.g. it was
+// sent before the webhook was live). Returns null on any failure so the caller
+// falls back to detecting from the creator's own words.
+export async function fetchThreadOpener(igsid: string): Promise<string | null> {
+  try {
+    const token = requireEnv("INSTAGRAM_ACCESS_TOKEN");
+
+    const convUrl = new URL("https://graph.instagram.com/v24.0/me/conversations");
+    convUrl.searchParams.set("platform", "instagram");
+    convUrl.searchParams.set("user_id", igsid);
+    convUrl.searchParams.set("access_token", token);
+    const convRes = await fetch(convUrl.toString());
+    const convData = await convRes.json();
+    const convId: string | undefined = convData?.data?.[0]?.id;
+    if (!convRes.ok || convData.error || !convId) return null;
+
+    const msgUrl = new URL(`https://graph.instagram.com/v24.0/${convId}/messages`);
+    msgUrl.searchParams.set("fields", "message,from");
+    msgUrl.searchParams.set("limit", "30");
+    msgUrl.searchParams.set("access_token", token);
+    const msgRes = await fetch(msgUrl.toString());
+    const msgData = await msgRes.json();
+    if (!msgRes.ok || msgData.error) return null;
+
+    // The Graph API returns messages newest-first, so the last element is the
+    // oldest — the opener.
+    const msgs: { message?: string }[] = msgData.data || [];
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      if (msgs[i]?.message) return msgs[i].message as string;
+    }
+    return null;
+  } catch (err) {
+    console.warn(`[instagram] thread opener fetch failed for ${igsid}:`, err);
+    return null;
+  }
+}
+
 // Optional tappable buttons shown above the composer. On Instagram, tapping one
 // sends its title as a normal text message and echoes its payload back in the
 // webhook (message.quick_reply.payload). Meta caps: <=13 buttons, title <=20 chars.

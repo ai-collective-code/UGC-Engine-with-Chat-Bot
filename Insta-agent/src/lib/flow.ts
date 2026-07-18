@@ -26,7 +26,7 @@ export const VOUCHER_INR = 2000;
 
 // Languages we have hand-written templates for. Detected languages without a
 // template fall back to FALLBACK_LANG (Hindi — the campaign's default_language).
-export type Lang = "en" | "hi" | "bn";
+export type Lang = "en" | "hi" | "bn" | "mr";
 export const FALLBACK_LANG: Lang = "hi";
 
 export type TemplateKind = "OFFER" | "WHATSAPP_ASK" | "CONFIRM";
@@ -39,16 +39,19 @@ export const TEMPLATES: Record<TemplateKind, Record<Lang, string>> = {
     en: `Thanks for your reply! We'd like to offer you a Rs ${VOUCHER_INR} voucher to make 1 reel featuring our product. Are you interested? (Reply Yes / No)`,
     hi: `Reply karne ke liye dhanyavaad! Hum aapko 1 reel banane ke liye Rs ${VOUCHER_INR} ka voucher dena chahte hain. Kya aap interested hain? (Haan / Nahi)`,
     bn: `Reply korar jonno dhonnobad! Amra apnake 1 ta reel bananor jonno Rs ${VOUCHER_INR} er voucher dite chai. Apni ki interested? (Haan / Na)`,
+    mr: `Reply kelyabaddal dhanyavaad! Aamhi tumhala 1 reel banvaayla Rs ${VOUCHER_INR} cha voucher deu. Tumhi interested aahat ka? (Ho / Nahi)`,
   },
   WHATSAPP_ASK: {
     en: `Great! Please share your WhatsApp number so our team can send you the details.`,
     hi: `Bahut badhiya! Kripya apna WhatsApp number bhejein taaki hamari team aapko details bhej sake.`,
     bn: `Darun! Doya kore apnar WhatsApp number ta din, jate amader team apnake details pathate pare.`,
+    mr: `Chhaan! Krupaya tumcha WhatsApp number dya, jenekarun aamchi team tumhala details pathvu shakel.`,
   },
   CONFIRM: {
     en: `Thank you! Our team will contact you on WhatsApp shortly. 🙏`,
     hi: `Dhanyavaad! Hamari team jald hi aapse WhatsApp par sampark karegi. 🙏`,
     bn: `Dhonnobad! Amader team khub shiggiri apnar sathe WhatsApp e jogajog korbe. 🙏`,
+    mr: `Dhanyavaad! Aamchi team lavkarach tumchyashi WhatsApp var sampark karel. 🙏`,
   },
 };
 
@@ -64,6 +67,7 @@ export const QUICK_YESNO: Record<Lang, { yes: string; no: string }> = {
   en: { yes: "Yes", no: "No" },
   hi: { yes: "Haan", no: "Nahi" },
   bn: { yes: "Haan", no: "Na" },
+  mr: { yes: "Ho", no: "Nahi" },
 };
 export const QR_YES_PAYLOAD = "FLOW_YES";
 export const QR_NO_PAYLOAD = "FLOW_NO";
@@ -118,6 +122,14 @@ const ROMAN_HINTS: Record<Exclude<Lang, "en">, string[]> = {
     "kaj", "sathe", "ekta", "icche", "prokash", "achi", "achhi", "moto",
     "holo", "bolchi", "theke", "pathate", "jogajog", "bhalo", "valo", "khub",
   ],
+  mr: [
+    // Distinctive romanized Marathi markers (avoid ultra-short ambiguous ones).
+    "aamhi", "aamchya", "aamchi", "aamcha", "tumhala", "tumcha", "tumchya",
+    "tumchyasobat", "tumhi", "tumchyashi", "tyana", "tyanna", "aahe", "ahe",
+    "aahat", "ahat", "aahot", "karto", "karte", "karaycha", "karaychi",
+    "sobat", "kelyabaddal", "krupaya", "jenekarun", "lavkarach", "banvaayla",
+    "mala", "tula", "kaay", "kasa", "kashi", "chhaan", "dya", "shakel", "ho",
+  ],
 };
 
 export function detectLanguage(text: string): Lang {
@@ -126,7 +138,7 @@ export function detectLanguage(text: string): Lang {
   }
   const tokens = new Set(norm(text).split(/[^a-z]+/).filter(Boolean));
   const lower = " " + norm(text) + " ";
-  const scores: Record<Exclude<Lang, "en">, number> = { hi: 0, bn: 0 };
+  const scores: Record<Exclude<Lang, "en">, number> = { hi: 0, bn: 0, mr: 0 };
   for (const lang of Object.keys(ROMAN_HINTS) as Exclude<Lang, "en">[]) {
     for (const hint of ROMAN_HINTS[lang]) {
       if (hint.includes(" ")) {
@@ -175,6 +187,8 @@ const YES_TOKENS = new Set([
   "karunga", "karungi", "chalega", "theek", "thik", "hoga", "hn",
   // Bengali (romanized)
   "hyan", "hae", "hmm", "obosshoi", "korbo", "raji", "hobe", "achha",
+  // Marathi (romanized) — "Ho" is the Marathi quick-reply Yes button label
+  "ho", "hoy", "chalel", "nakki",
 ]);
 const YES_PHRASES = [
   "i am in", "im in", "i'm in", "ji haan", "haan ji", "theek hai", "thik hai",

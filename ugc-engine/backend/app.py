@@ -1169,6 +1169,11 @@ def api_stats():
 
 
 if __name__ == "__main__":
+    # Bind 0.0.0.0 and honour $PORT so this runs under a host like Render (which
+    # injects PORT and routes to it) as well as locally. Production deploys
+    # should front this with gunicorn (see requirements.txt) rather than Flask's
+    # dev server; this block is the local-dev / fallback entrypoint.
+    port = int(os.environ.get("PORT", 8000))
     print(f"Dashboard DB: {local_db.DB_PATH}")
-    print("Starting dashboard on http://localhost:8000")
-    app.run(port=8000, debug=False)
+    print(f"Starting dashboard on http://0.0.0.0:{port}")
+    app.run(host="0.0.0.0", port=port, debug=False)

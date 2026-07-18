@@ -74,5 +74,9 @@ DEFAULT_NICHE_PHRASE = "construction/mistri"
 def render_message(language, name, niche_key, brand, offer):
     lang = language if language in TEMPLATES else DEFAULT_LANGUAGE
     niche = NICHE_PHRASE.get(niche_key, DEFAULT_NICHE_PHRASE)
-    first_name = (name or "").split()[0] if name else "Bhai"
+    # name can arrive as a float (pandas reads an empty cell as NaN, which is
+    # truthy) or a number, so coerce to a real string before splitting -- a
+    # nameless/odd row must never crash the whole import.
+    name = name.strip() if isinstance(name, str) else ""
+    first_name = name.split()[0] if name else "Bhai"
     return TEMPLATES[lang].format(name=first_name, niche=niche, brand=brand, offer=offer)

@@ -23,7 +23,10 @@ import tempfile
 import threading
 
 from dotenv import load_dotenv
-load_dotenv()
+# Load ugc-engine/.env by absolute path so config is found no matter which
+# directory the process is started from (Render uses real env vars; this is a
+# no-op there).
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env"))
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lib"))
 import local_db
@@ -310,6 +313,60 @@ ALLOWED_UPLOAD_EXTENSIONS = {".xlsx", ".xls"}
 VALID_PLATFORMS = {"instagram", "facebook", "youtube", "linkedin"}
 
 
+def _rebuild_config_from_db(client):
+    """Reconstruct a client's config dict from its DB row (the inverse of
+    upsert_client_from_config). Post-migration the database is the source of
+    truth, so this lets us regenerate a config that only ever existed as a file
+    on some other machine, or whose disk was wiped on a redeploy."""
+    return {
+        "client_name": client.get("client_name") or client["client_key"],
+        "campaign_name": client.get("campaign_name") or "",
+        "brand_display_name": client.get("brand_display_name") or client.get("client_name") or client["client_key"],
+        "offer_line": {"value": client.get("offer_line") or ""},
+        "default_language": client.get("default_language") or "Hindi",
+        "phone_regex": r"(?:\+?91[\-\s]?)?[6-9]\d{9}",
+        "input_sheet": {"profiles_sheet": "Unique Profiles", "posts_sheet": "All Posts"},
+        "channels": {
+            "instagram_dm": bool(client.get("instagram_enabled")),
+            "whatsapp": bool(client.get("whatsapp_enabled")),
+            "facebook_dm": bool(client.get("facebook_enabled")),
+        },
+        "compliance_note": client.get("compliance_note") or "",
+        "negotiation": {
+            "opening_voucher_inr": client.get("opening_voucher_inr"),
+            "max_voucher_inr": client.get("max_voucher_inr"),
+            "voucher_type": client.get("voucher_type") or "Amazon Voucher",
+            "reimbursement": client.get("reimbursement") or "",
+            "deliverables": client.get("deliverables") or "",
+            "human_confirm_before_close": True,
+        },
+    }
+
+
+def _client_config(client):
+    """Return a client's config dict. Prefers config/<key>.json on disk (which
+    the CLI scripts + negotiator webhooks also read via CLIENT_CONFIG); if the
+    file is missing -- the client was created in another copy, or the disk was
+    wiped on a redeploy -- rebuilds it from the DB row and writes it back so the
+    file exists again for those other processes. Raises RuntimeError only when an
+    existing file is present but corrupt."""
+    config_path = os.path.join(CONFIG_DIR, f"{client['client_key']}.json")
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, encoding="utf-8") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError) as e:
+            raise RuntimeError(f"config/{client['client_key']}.json is corrupt or unreadable: {e}")
+    cfg = _rebuild_config_from_db(client)
+    try:
+        os.makedirs(CONFIG_DIR, exist_ok=True)
+        with open(config_path, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, indent=2, ensure_ascii=False)
+    except OSError:
+        pass  # best-effort persist; the in-memory config is still returned
+    return cfg
+
+
 def _validate_upload_request(form, files):
     """Shared client/platform/file/config validation for /api/upload and
     /api/upload/preview. Returns (client, cfg, file, ext, error_response).
@@ -334,14 +391,10 @@ def _validate_upload_request(form, files):
     if ext not in ALLOWED_UPLOAD_EXTENSIONS:
         return None, None, None, None, (jsonify({"error": "only .xlsx/.xls files are supported"}), 400)
 
-    config_path = os.path.join(CONFIG_DIR, f"{client['client_key']}.json")
-    if not os.path.exists(config_path):
-        return None, None, None, None, (jsonify({"error": f"config/{client['client_key']}.json not found on disk"}), 500)
     try:
-        with open(config_path, encoding="utf-8") as f:
-            cfg = json.load(f)
-    except (json.JSONDecodeError, OSError) as e:
-        return None, None, None, None, (jsonify({"error": f"config/{client['client_key']}.json is corrupt or unreadable: {e}"}), 500)
+        cfg = _client_config(client)
+    except RuntimeError as e:
+        return None, None, None, None, (jsonify({"error": str(e)}), 500)
 
     return client, cfg, file, ext, None
 
@@ -411,17 +464,11 @@ def api_upload_creators():
 # --- Apify live scraping -----------------------------------------------------
 
 def _load_client_cfg(client):
-    """Load a client's config JSON off disk (for the scrape/import pipeline).
-    Raises RuntimeError on a corrupt/unreadable file so callers surface a clean
-    JSON error instead of an HTML 500."""
-    config_path = os.path.join(CONFIG_DIR, f"{client['client_key']}.json")
-    if not os.path.exists(config_path):
-        return None
-    try:
-        with open(config_path, encoding="utf-8") as f:
-            return json.load(f)
-    except (json.JSONDecodeError, OSError) as e:
-        raise RuntimeError(f"config/{client['client_key']}.json is corrupt or unreadable: {e}")
+    """Load a client's config for the scrape/import pipeline. Uses the shared
+    loader, which rebuilds the config from the DB when the file is missing, so
+    this no longer returns None for a client that exists in the DB. Still raises
+    RuntimeError on a corrupt/unreadable existing file."""
+    return _client_config(client)
 
 
 @app.route("/api/scrape", methods=["POST"])

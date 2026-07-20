@@ -147,6 +147,24 @@ CREATE TABLE IF NOT EXISTS creator_reputation (
     created_at TEXT DEFAULT to_char((now() AT TIME ZONE 'UTC'), 'YYYY-MM-DD HH24:MI:SS')
 );
 CREATE INDEX IF NOT EXISTS idx_reputation_username ON creator_reputation(username);
+
+-- Shop verification queue: local tile/hardware shops a human agent calls to
+-- confirm they stock the client's product, so a creator can be routed to a
+-- shop that actually has it. status: pending -> has_product | no_product |
+-- no_answer | callback -> sent (once the shop is forwarded to the creator).
+CREATE TABLE IF NOT EXISTS shop_verifications (
+    id SERIAL PRIMARY KEY,
+    client_id INTEGER REFERENCES clients(id),
+    creator_contact TEXT,
+    area TEXT,
+    shop_name TEXT,
+    phone TEXT NOT NULL,
+    status TEXT DEFAULT 'pending',
+    notes TEXT,
+    created_at TEXT DEFAULT to_char((now() AT TIME ZONE 'UTC'), 'YYYY-MM-DD HH24:MI:SS'),
+    updated_at TEXT DEFAULT to_char((now() AT TIME ZONE 'UTC'), 'YYYY-MM-DD HH24:MI:SS')
+);
+CREATE INDEX IF NOT EXISTS idx_shops_client ON shop_verifications(client_id);
 """
 
 
@@ -840,3 +858,68 @@ def list_reputation(username):
             (username,),
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+# --- shop verification (human-assisted dialer) ----------------------------
+
+SHOP_STATUSES = ("pending", "has_product", "no_product", "no_answer", "callback", "sent")
+
+
+def insert_shops(client_id, creator_contact, area, records):
+    """records: list of {shop_name, phone}. Skips rows with no phone. Returns
+    the number of rows inserted."""
+    inserted = 0
+    with get_conn() as conn:
+        for r in records:
+            phone = (r.get("phone") or "").strip()
+            if not phone:
+                continue
+            conn.execute(
+                "INSERT INTO shop_verifications (client_id, creator_contact, area, shop_name, phone) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (client_id, creator_contact, area, (r.get("shop_name") or "").strip() or None, phone),
+            )
+            inserted += 1
+    return inserted
+
+
+def list_shops(client_id=None, status=None):
+    q = "SELECT * FROM shop_verifications WHERE 1=1"
+    params = []
+    if client_id:
+        q += " AND client_id = ?"
+        params.append(client_id)
+    if status:
+        q += " AND status = ?"
+        params.append(status)
+    # Pending first (work queue), then most recently touched.
+    q += " ORDER BY CASE status WHEN 'pending' THEN 0 ELSE 1 END, updated_at DESC, id DESC"
+    with get_conn() as conn:
+        rows = conn.execute(q, params).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_shop(shop_id):
+    with get_conn() as conn:
+        row = conn.execute("SELECT * FROM shop_verifications WHERE id = ?", (shop_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def update_shop(shop_id, status=None, notes=None):
+    """Update a shop's status and/or notes. Returns rows updated (0 = no such row)."""
+    sets, params = [], []
+    if status is not None:
+        sets.append("status = ?")
+        params.append(status)
+    if notes is not None:
+        sets.append("notes = ?")
+        params.append(notes)
+    if not sets:
+        return 0
+    sets.append("updated_at = to_char((now() AT TIME ZONE 'UTC'), 'YYYY-MM-DD HH24:MI:SS')")
+    params.append(shop_id)
+    with get_conn() as conn:
+        cur = conn.execute(
+            f"UPDATE shop_verifications SET {', '.join(sets)} WHERE id = ?", params
+        )
+        return cur.rowcount

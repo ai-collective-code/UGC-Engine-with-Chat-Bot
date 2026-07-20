@@ -212,6 +212,7 @@ function loadSection(section) {
   if (section === "spinner") return loadSpinner();
   if (section === "actions") return loadActions();
   if (section === "clients") return loadClients();
+  if (section === "shops") return loadShops();
 }
 
 // --- Client filter ──────────────────────────────────────────────────────────
@@ -1606,6 +1607,123 @@ function initAddClientForm() {
   if (cancelBtn) cancelBtn.addEventListener("click", resetClientForm);
 }
 
+// --- Shop Verify (human-assisted dialer) ─────────────────────────────────────
+
+const SHOP_STATUS_LABEL = {
+  pending: "Pending", has_product: "Has product ✓", no_product: "No product",
+  no_answer: "No answer", callback: "Call back", sent: "Sent to creator ✓",
+};
+const BTN_SM = "padding:4px 9px; font-size:11px";
+
+async function loadShops() {
+  const clients = await api("/api/clients").catch(() => []);
+  const csel = document.getElementById("shops-client-select");
+  if (csel) {
+    const cur = csel.value;
+    csel.innerHTML = '<option value="">— optional —</option>' + clients.map(
+      (c) => `<option value="${c.id}">${escapeHtml(c.brand_display_name || c.client_name)}</option>`
+    ).join("");
+    csel.value = cur;
+  }
+
+  const shops = await api("/api/shops").catch(() => []);
+  const tbody = document.getElementById("shops-tbody");
+  const countEl = document.getElementById("shops-count");
+  const pending = shops.filter((s) => s.status === "pending").length;
+  const confirmed = shops.filter((s) => s.status === "has_product").length;
+  if (countEl) countEl.textContent = `${shops.length} shops · ${pending} pending · ${confirmed} confirmed`;
+
+  tbody.innerHTML = shops.length ? shops.map((s) => {
+    const cls = (s.status === "has_product" || s.status === "sent") ? "badge-active"
+      : s.status === "pending" ? "badge-info" : "";
+    return `
+    <tr data-shop="${s.id}">
+      <td>${escapeHtml(s.shop_name || "—")}</td>
+      <td>${escapeHtml(s.phone)}</td>
+      <td>${escapeHtml(s.area || "—")}</td>
+      <td>${s.creator_contact ? "@" + escapeHtml(s.creator_contact) : "—"}</td>
+      <td>${badge(SHOP_STATUS_LABEL[s.status] || s.status, cls)}</td>
+      <td>
+        <div style="display:flex; gap:4px; flex-wrap:wrap">
+          <button class="btn" style="${BTN_SM}" data-shop-call="${s.id}">📞 Call</button>
+          <button class="btn" style="${BTN_SM}" data-shop-status="${s.id}" data-status="has_product">✓ Has it</button>
+          <button class="btn" style="${BTN_SM}" data-shop-status="${s.id}" data-status="no_product">✗ No</button>
+          <button class="btn" style="${BTN_SM}" data-shop-status="${s.id}" data-status="no_answer">No answer</button>
+          <button class="btn btn-primary" style="${BTN_SM}" data-shop-send="${s.id}" ${s.status === "has_product" ? "" : "disabled"}>Send to creator</button>
+        </div>
+      </td>
+    </tr>`;
+  }).join("") : '<tr><td colspan="6" class="muted">No shops yet — add some above.</td></tr>';
+
+  tbody.querySelectorAll("[data-shop-call]").forEach((b) =>
+    b.addEventListener("click", () => shopCall(b.getAttribute("data-shop-call"))));
+  tbody.querySelectorAll("[data-shop-status]").forEach((b) =>
+    b.addEventListener("click", () => shopSetStatus(b.getAttribute("data-shop-status"), b.getAttribute("data-status"))));
+  tbody.querySelectorAll("[data-shop-send]").forEach((b) =>
+    b.addEventListener("click", () => shopSendToCreator(b.getAttribute("data-shop-send"))));
+}
+
+async function shopCall(id) {
+  try {
+    const agent_phone = (document.getElementById("shops-agent-phone")?.value || "").trim();
+    const res = await api(`/api/shops/${id}/call`, { method: "POST", body: JSON.stringify({ agent_phone }) });
+    if (res.mode === "tel" && res.tel_url) {
+      window.location.href = res.tel_url; // opens the agent's dialer / softphone
+    } else if (res.mode === "provider") {
+      showToast(res.message || "Connecting call…", "success");
+    }
+  } catch (err) {
+    showToast(err.message, "error");
+  }
+}
+
+async function shopSetStatus(id, status) {
+  try {
+    await api(`/api/shops/${id}`, { method: "PATCH", body: JSON.stringify({ status }) });
+    showToast("Status updated", "success");
+    loadShops();
+  } catch (err) { showToast(err.message, "error"); }
+}
+
+async function shopSendToCreator(id) {
+  try {
+    const res = await api(`/api/shops/${id}/send-to-creator`, { method: "POST", body: JSON.stringify({}) });
+    showToast("Sent to creator ✓", "success");
+    loadShops();
+  } catch (err) { showToast(err.message, "error"); }
+}
+
+function initShopsForm() {
+  const form = document.getElementById("shops-import-form");
+  if (!form) return;
+  const msgEl = document.getElementById("shops-import-message");
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const btn = form.querySelector('button[type="submit"]');
+    if (btn) btn.disabled = true;
+    msgEl.textContent = ""; msgEl.className = "form-message";
+    const data = new FormData(form);
+    const payload = {
+      client_id: Number(data.get("client_id")) || undefined,
+      creator_contact: data.get("creator_contact"),
+      area: data.get("area"),
+      numbers: data.get("numbers"),
+    };
+    try {
+      const res = await api("/api/shops/import", { method: "POST", body: JSON.stringify(payload) });
+      msgEl.textContent = `✓ Added ${res.imported} shop(s) to the queue.`;
+      msgEl.className = "form-message success";
+      form.elements["numbers"].value = "";
+      loadShops();
+    } catch (err) {
+      msgEl.textContent = `✗ ${err.message}`;
+      msgEl.className = "form-message error";
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  });
+}
+
 // --- Negotiator kill switch ──────────────────────────────────────────────────
 
 async function refreshNegotiatorStatus() {
@@ -2191,6 +2309,7 @@ async function init() {
   initNav();
   initFilters();
   initAddClientForm();
+  initShopsForm();
   initScrape();
   initAnalyzer();
   initVerify();

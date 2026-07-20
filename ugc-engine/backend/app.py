@@ -221,6 +221,141 @@ def api_update_client(client_id):
     return jsonify(local_db.get_client(client_id))
 
 
+# --- shop verification (human-assisted dialer) -------------------------
+#
+# A human agent works a queue of local shops, calling each to confirm it stocks
+# the client's product. Calls are placed either through a cloud-telephony
+# provider (Exotel, if configured) which rings the agent and bridges the shop,
+# or via a click-to-dial `tel:` link the browser hands to the agent's phone /
+# softphone. Confirmed shops are forwarded to the creator through the existing
+# Instagram bridge. No automated/robocall path -- a person is always on the line.
+
+_PHONE_RE = re.compile(r"(\+?\d[\d\s\-]{6,}\d)")
+
+
+def _parse_shop_lines(text):
+    """Parse pasted lines into [{shop_name, phone}]. Accepts 'Name, 98765 43210',
+    'Name 011-4455-6677', or a bare number per line; skips lines without a
+    plausible (>=8 digit) phone."""
+    out = []
+    for line in (text or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        m = _PHONE_RE.search(line)
+        if not m:
+            continue
+        phone = re.sub(r"[\s\-]", "", m.group(1))
+        if len(re.sub(r"\D", "", phone)) < 8:
+            continue
+        name = line.replace(m.group(1), "").strip(" ,-|\t")
+        out.append({"shop_name": name, "phone": phone})
+    return out
+
+
+def _exotel_connect(agent_phone, shop_phone):
+    """Provider-bridged click-to-call via Exotel: rings the agent first, then
+    connects the shop. Returns True on success, False on failure, or None when
+    Exotel isn't configured (so the caller falls back to a tel: link)."""
+    sid = os.environ.get("EXOTEL_SID")
+    token = os.environ.get("EXOTEL_TOKEN")
+    caller_id = os.environ.get("EXOTEL_CALLER_ID")
+    subdomain = os.environ.get("EXOTEL_SUBDOMAIN", "api.exotel.com")
+    if not (sid and token and caller_id):
+        return None
+    try:
+        import requests
+        resp = requests.post(
+            f"https://{subdomain}/v1/Accounts/{sid}/Calls/connect.json",
+            auth=(sid, token),
+            data={"From": agent_phone, "To": shop_phone, "CallerId": caller_id},
+            timeout=15,
+        )
+        return resp.status_code < 400
+    except Exception as e:  # noqa: BLE001 -- any provider/network error is non-fatal
+        print(f"[shops] Exotel connect failed: {e}", file=sys.stderr)
+        return False
+
+
+@app.route("/api/shops/import", methods=["POST"])
+def api_shops_import():
+    """Queue a batch of shop numbers for verification, optionally tied to a
+    client, creator handle, and area."""
+    payload = request.get_json(silent=True) or {}
+    records = _parse_shop_lines(payload.get("numbers") or "")
+    if not records:
+        return jsonify({"error": "no valid phone numbers found"}), 400
+    count = local_db.insert_shops(
+        _to_int(payload.get("client_id"), None),
+        (payload.get("creator_contact") or "").strip().lstrip("@") or None,
+        (payload.get("area") or "").strip() or None,
+        records,
+    )
+    return jsonify({"status": "ok", "imported": count}), 201
+
+
+@app.route("/api/shops", methods=["GET"])
+def api_shops_list():
+    return jsonify(local_db.list_shops(
+        client_id=request.args.get("client_id", type=int),
+        status=request.args.get("status"),
+    ))
+
+
+@app.route("/api/shops/<int:shop_id>", methods=["PATCH"])
+def api_shop_update(shop_id):
+    payload = request.get_json(silent=True) or {}
+    status = payload.get("status")
+    if status is not None and status not in local_db.SHOP_STATUSES:
+        return jsonify({"error": f"status must be one of {list(local_db.SHOP_STATUSES)}"}), 400
+    n = local_db.update_shop(shop_id, status=status, notes=payload.get("notes"))
+    if n == 0:
+        return jsonify({"error": "unknown shop id"}), 404
+    return jsonify(local_db.get_shop(shop_id))
+
+
+@app.route("/api/shops/<int:shop_id>/call", methods=["POST"])
+def api_shop_call(shop_id):
+    """Place the call. If an agent number is available AND Exotel is configured,
+    bridge the call server-side; otherwise return a tel: link for the browser to
+    open on the agent's device."""
+    shop = local_db.get_shop(shop_id)
+    if not shop:
+        return jsonify({"error": "unknown shop id"}), 404
+    payload = request.get_json(silent=True) or {}
+    agent_phone = (payload.get("agent_phone") or os.environ.get("AGENT_PHONE") or "").strip()
+    if agent_phone:
+        result = _exotel_connect(agent_phone, shop["phone"])
+        if result is True:
+            return jsonify({"mode": "provider",
+                            "message": f"Ringing you at {agent_phone}, then connecting the shop."})
+        if result is False:
+            return jsonify({"error": "Provider call failed — dial the number manually."}), 502
+        # result is None -> provider not configured; fall through to tel:.
+    return jsonify({"mode": "tel", "tel_url": f"tel:{shop['phone']}"})
+
+
+@app.route("/api/shops/<int:shop_id>/send-to-creator", methods=["POST"])
+def api_shop_send_to_creator(shop_id):
+    """Forward a confirmed shop to the creator via the Instagram bridge."""
+    shop = local_db.get_shop(shop_id)
+    if not shop:
+        return jsonify({"error": "unknown shop id"}), 404
+    contact = ((request.get_json(silent=True) or {}).get("creator_contact")
+               or shop.get("creator_contact"))
+    if not contact:
+        return jsonify({"error": "no creator to send to — set a creator handle first"}), 400
+    name = shop.get("shop_name") or "a local shop"
+    where = f" in {shop['area']}" if shop.get("area") else ""
+    message = (f"Good news! You can buy the product at {name}{where}. "
+               f"Phone: {shop['phone']}. Please use your coupon there. \U0001f64f")
+    ok, err = supabase_bridge.send_instagram_reply(contact, message)
+    if not ok:
+        return jsonify({"error": err or "send failed"}), 502
+    local_db.update_shop(shop_id, status="sent")
+    return jsonify({"status": "sent", "message": message})
+
+
 # --- creators ----------------------------------------------------------
 
 @app.route("/api/creators", methods=["GET"])

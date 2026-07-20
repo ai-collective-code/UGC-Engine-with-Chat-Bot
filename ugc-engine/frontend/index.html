@@ -74,6 +74,9 @@
         <button class="nav-item" data-section="clients" id="nav-clients">
           <span class="nav-icon">🏢</span> Clients
         </button>
+        <button class="nav-item" data-section="shops" id="nav-shops">
+          <span class="nav-icon">📞</span> Shop Verify
+        </button>
       </nav>
 
       <div class="sidebar-footer">
@@ -668,6 +671,41 @@
             <button type="button" id="client-form-cancel" class="btn full-width" style="display:none">Cancel edit</button>
             <div class="form-message" id="add-client-message"></div>
           </form>
+        </div>
+      </section>
+
+      <!-- ═══ SHOP VERIFY (human-assisted dialer) ═══ -->
+      <section id="section-shops" class="section" hidden>
+        <div class="panel">
+          <div class="panel-head">
+            <h2>Import shops to verify</h2>
+            <span class="panel-hint">A human agent calls each shop to confirm it stocks the product, then forwards a confirmed shop to the creator.</span>
+          </div>
+          <form id="shops-import-form" class="form-grid">
+            <label>Client<select name="client_id" id="shops-client-select"></select></label>
+            <label>Creator handle <small>(Instagram username to notify)</small><input name="creator_contact" placeholder="arka_pravo5"></label>
+            <label class="full-width">Area / City<input name="area" placeholder="Saharsa, Bihar"></label>
+            <label class="full-width">Shop numbers <small>(one per line — "Shop Name, 98765 43210" or just the number)</small>
+              <textarea name="numbers" rows="6" placeholder="Sharma Tiles, 9876543210&#10;Verma Hardware, 9123456780&#10;9988776655"></textarea>
+            </label>
+            <label>Your phone <small>(optional — for provider-bridged calls)</small><input name="agent_phone" id="shops-agent-phone" placeholder="9876500000"></label>
+            <button type="submit" class="btn btn-primary full-width">+ Add to queue</button>
+            <div class="form-message" id="shops-import-message"></div>
+          </form>
+        </div>
+        <div class="panel">
+          <div class="panel-head">
+            <h2>Call queue</h2>
+            <span class="panel-hint" id="shops-count"></span>
+          </div>
+          <div class="table-wrap" style="overflow-x:auto">
+            <table class="data-table" id="shops-table">
+              <thead>
+                <tr><th>Shop</th><th>Phone</th><th>Area</th><th>Creator</th><th>Status</th><th>Actions</th></tr>
+              </thead>
+              <tbody id="shops-tbody"></tbody>
+            </table>
+          </div>
         </div>
       </section>
     </main>

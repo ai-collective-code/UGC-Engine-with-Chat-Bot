@@ -277,6 +277,75 @@ def _exotel_connect(agent_phone, shop_phone):
         return False
 
 
+def _google_places_nearby(location, keywords):
+    """Find local shops (name + phone) near `location` via the Google Places API
+    (New) Text Search. One request per keyword; the field mask pulls the phone
+    number inline (no per-place detail call). Returns a list of
+    {shop_name, phone} (deduped), [] if none found, or None when no API key is
+    configured (so the caller can tell the user to paste manually instead)."""
+    key = os.environ.get("GOOGLE_MAPS_API_KEY") or os.environ.get("GOOGLE_PLACES_API_KEY")
+    if not key:
+        return None
+    import requests
+    shops, seen = [], set()
+    for kw in keywords:
+        try:
+            resp = requests.post(
+                "https://places.googleapis.com/v1/places:searchText",
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Goog-Api-Key": key,
+                    "X-Goog-FieldMask": "places.displayName,places.nationalPhoneNumber,places.formattedAddress",
+                },
+                json={"textQuery": f"{kw} in {location}"},
+                timeout=20,
+            )
+            data = resp.json()
+        except Exception as e:  # noqa: BLE001
+            print(f"[shops] Places search failed for '{kw}': {e}", file=sys.stderr)
+            continue
+        for p in data.get("places", []):
+            name = (p.get("displayName") or {}).get("text")
+            phone = p.get("nationalPhoneNumber")
+            if not phone:
+                continue
+            dedupe_key = re.sub(r"\D", "", phone)
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+            shops.append({"shop_name": name, "phone": phone})
+    return shops
+
+
+@app.route("/api/shops/nearby", methods=["POST"])
+def api_shops_nearby():
+    """Auto-source shops near a (finalized) creator's location via Google Places
+    and drop them straight into the call queue, tied to that creator."""
+    payload = request.get_json(silent=True) or {}
+    location = (payload.get("location") or "").strip()
+    if not location:
+        return jsonify({"error": "location is required"}), 400
+    keywords = payload.get("keywords") or [
+        "tiles shop", "hardware store", "tiles and sanitary shop", "building material shop",
+    ]
+    shops = _google_places_nearby(location, keywords)
+    if shops is None:
+        return jsonify({
+            "error": "Google Places isn't configured — set GOOGLE_MAPS_API_KEY, "
+                     "or paste shop numbers manually below."
+        }), 501
+    if not shops:
+        return jsonify({"status": "ok", "found": 0, "imported": 0,
+                        "message": "No shops with public phone numbers found for that location."})
+    count = local_db.insert_shops(
+        _to_int(payload.get("client_id"), None),
+        (payload.get("creator_contact") or "").strip().lstrip("@") or None,
+        location,
+        shops,
+    )
+    return jsonify({"status": "ok", "found": len(shops), "imported": count})
+
+
 @app.route("/api/shops/import", methods=["POST"])
 def api_shops_import():
     """Queue a batch of shop numbers for verification, optionally tied to a

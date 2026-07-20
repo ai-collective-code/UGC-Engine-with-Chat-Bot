@@ -1626,6 +1626,30 @@ async function loadShops() {
     csel.value = cur;
   }
 
+  // Finalized creators (agreed on WhatsApp = status "Converted"). Each gets a
+  // "Find shops" button that auto-sources nearby shops for their location.
+  const finals = await api("/api/creators?status=Converted").catch(() => []);
+  const fc = document.getElementById("final-creators-list");
+  if (fc) {
+    fc.innerHTML = finals.length ? finals.map((c) => {
+      const loc = c.location_raw || c.matched_state || "";
+      const handle = c.username || "";
+      return `
+      <div class="row-item" style="display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid var(--border,#2222)">
+        <div style="flex:1; min-width:0">
+          <div style="font-weight:600">${escapeHtml(c.full_name || handle || "Creator")}</div>
+          <div class="muted" style="font-size:12px">${handle ? "@" + escapeHtml(handle) : ""}${loc ? " · 📍 " + escapeHtml(loc) : " · no location on file"}</div>
+        </div>
+        <button class="btn btn-primary" style="${BTN_SM}" data-find-shops="${c.id}"${loc ? "" : " disabled"}>Find shops</button>
+      </div>`;
+    }).join("") : '<div class="muted">No finalized creators yet — they appear here once a deal is agreed (status "Converted").</div>';
+
+    fc.querySelectorAll("[data-find-shops]").forEach((b) => {
+      const c = finals.find((x) => String(x.id) === b.getAttribute("data-find-shops"));
+      b.addEventListener("click", () => shopFindNearby(c, b));
+    });
+  }
+
   const shops = await api("/api/shops").catch(() => []);
   const tbody = document.getElementById("shops-tbody");
   const countEl = document.getElementById("shops-count");
@@ -1661,6 +1685,34 @@ async function loadShops() {
     b.addEventListener("click", () => shopSetStatus(b.getAttribute("data-shop-status"), b.getAttribute("data-status"))));
   tbody.querySelectorAll("[data-shop-send]").forEach((b) =>
     b.addEventListener("click", () => shopSendToCreator(b.getAttribute("data-shop-send"))));
+}
+
+async function shopFindNearby(creator, btn) {
+  if (!creator) return;
+  const location = creator.location_raw || creator.matched_state;
+  if (!location) { showToast("No location on file for this creator", "error"); return; }
+  if (btn) { btn.disabled = true; btn.textContent = "Finding…"; }
+  try {
+    const res = await api("/api/shops/nearby", {
+      method: "POST",
+      body: JSON.stringify({
+        location,
+        creator_contact: creator.username,
+        client_id: creator.client_id,
+      }),
+    });
+    if (res.imported > 0) {
+      showToast(`Added ${res.imported} nearby shop(s) for ${creator.username || "creator"}`, "success");
+    } else {
+      showToast(res.message || "No shops found for that location", "info");
+    }
+    loadShops();
+  } catch (err) {
+    // 501 = Google not configured; guide the user to manual paste.
+    showToast(err.message, "error");
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "Find shops"; }
+  }
 }
 
 async function shopCall(id) {

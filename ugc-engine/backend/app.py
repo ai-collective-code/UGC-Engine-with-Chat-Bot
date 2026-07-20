@@ -319,19 +319,19 @@ def _google_places_nearby(location, keywords):
 
 @app.route("/api/shops/nearby", methods=["POST"])
 def api_shops_nearby():
-    """Auto-source shops near a (finalized) creator's location via Google Places
-    and drop them straight into the call queue, tied to that creator."""
+    """Auto-source tiles/hardware shops near a (finalized) creator's location via
+    the Google Maps Places API, and drop them straight into the call queue, tied
+    to that creator."""
     payload = request.get_json(silent=True) or {}
     location = (payload.get("location") or "").strip()
     if not location:
         return jsonify({"error": "location is required"}), 400
-    keywords = payload.get("keywords") or [
-        "tiles shop", "hardware store", "tiles and sanitary shop", "building material shop",
-    ]
+    keywords = payload.get("keywords") or ["tiles shop", "hardware store"]
+
     shops = _google_places_nearby(location, keywords)
     if shops is None:
         return jsonify({
-            "error": "Google Places isn't configured — set GOOGLE_MAPS_API_KEY, "
+            "error": "Google Maps isn't configured — set GOOGLE_MAPS_API_KEY, "
                      "or paste shop numbers manually below."
         }), 501
     if not shops:

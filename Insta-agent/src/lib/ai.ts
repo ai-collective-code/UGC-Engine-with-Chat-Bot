@@ -61,6 +61,66 @@ async function getGeminiResponse(
   return text?.trim() || null;
 }
 
+// One-shot Gemini text completion with a custom system instruction (separate
+// from the negotiator prompt above). Used for the deterministic-flow helpers
+// below: language detection and template translation. Returns null on failure.
+async function geminiComplete(systemInstruction: string, userText: string): Promise<string | null> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) return null;
+  try {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        system_instruction: { parts: [{ text: systemInstruction }] },
+        contents: [{ role: "user", parts: [{ text: userText }] }],
+      }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const text: string | undefined = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    return text?.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+// Detect the language of a message. Returns a plain English language name
+// ("Bengali", "Telugu", "English", …) or null on failure. Romanized Indian
+// languages are reported as that language, not English.
+export async function detectLanguageName(text: string): Promise<string | null> {
+  const out = await geminiComplete(
+    "You are a language detector. Reply with ONLY the English name of the language " +
+      "the message is written in (e.g. 'Hindi', 'Bengali', 'Telugu', 'Tamil', " +
+      "'English'). Romanized/Latin-script Indian languages count as that language, " +
+      "NOT English. Answer in one or two words, nothing else.",
+    text.slice(0, 500)
+  );
+  if (!out) return null;
+  const name = out.replace(/[^a-zA-Z ]/g, "").trim();
+  return name.length ? name : null;
+}
+
+// Translate a FIXED template (our own text — never creator input, so no
+// injection surface) into `languageName`, romanized. Returns null on failure or
+// corruption so the caller can fall back to the English text.
+export async function translateTo(englishText: string, languageName: string): Promise<string | null> {
+  const out = await geminiComplete(
+    `Translate the user's message into ${languageName}, written in ROMANIZED Latin ` +
+      `script (the way people type ${languageName} on a phone keyboard — no native ` +
+      `script, no diacritics). Keep it natural and friendly. Preserve any "Rs 2000", ` +
+      `numbers, emojis, and "(Yes / No)"-style hints. Reply with ONLY the translation.`,
+    englishText
+  );
+  if (!out) return null;
+  if (looksCorrupted(out)) {
+    console.warn("[ai] translation looked corrupted, falling back to English:", out.slice(0, 120));
+    return null;
+  }
+  return stripMarkdown(out);
+}
+
 // Rupee figures the model actually offered: numbers currency-marked (Rs/INR/₹)
 // or attached to voucher/amazon language. Deliberately conservative -- we only
 // care about money it puts on the table. Mirrors _amounts_in() in the UGC

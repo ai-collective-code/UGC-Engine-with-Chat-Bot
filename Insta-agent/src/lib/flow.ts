@@ -29,6 +29,36 @@ export const VOUCHER_INR = 2000;
 export type Lang = "en" | "hi" | "bn" | "mr";
 export const FALLBACK_LANG: Lang = "hi";
 
+const HARDCODED_LANGS: readonly string[] = ["en", "hi", "bn", "mr"];
+export function isHardcodedLang(x: string): x is Lang {
+  return HARDCODED_LANGS.includes(x);
+}
+
+// Romanized Yes/No labels for languages that DON'T have a hardcoded template
+// (the webhook AI-translates the message body for these, and uses this table to
+// localize the tappable buttons). Keyed by lowercase English language name.
+// Anything not listed falls back to English Yes/No — the button still works
+// because classification is driven by the quick-reply payload, not the label.
+export const YESNO_BY_LANG: Record<string, { yes: string; no: string }> = {
+  telugu: { yes: "Avunu", no: "Kaadu" },
+  tamil: { yes: "Aama", no: "Illai" },
+  kannada: { yes: "Haudu", no: "Illa" },
+  malayalam: { yes: "Athe", no: "Alla" },
+  gujarati: { yes: "Ha", no: "Na" },
+  punjabi: { yes: "Haan", no: "Nahi" },
+  odia: { yes: "Han", no: "Na" },
+  assamese: { yes: "Hoi", no: "Nohoi" },
+  nepali: { yes: "Ho", no: "Hoina" },
+  urdu: { yes: "Haan", no: "Nahi" },
+  konkani: { yes: "Vhoi", no: "Na" },
+  maithili: { yes: "Haan", no: "Nai" },
+  bhojpuri: { yes: "Haan", no: "Naikhe" },
+};
+
+export function yesNoLabels(languageName: string): { yes: string; no: string } {
+  return YESNO_BY_LANG[languageName.toLowerCase()] ?? { yes: "Yes", no: "No" };
+}
+
 export type TemplateKind = "OFFER" | "WHATSAPP_ASK" | "CONFIRM";
 
 // Fixed message templates. Romanized regional text is written in plain ASCII
@@ -302,14 +332,23 @@ function offerDecision(lang: Lang, reason: string): FlowDecision {
  * MUST be the just-received creator (user) message.
  */
 export function decide(
-  history: { role: "user" | "assistant"; content: string }[]
+  history: { role: "user" | "assistant"; content: string }[],
+  forcedLang?: string
 ): FlowDecision {
   const assistantMsgs = history.filter((m) => m.role === "assistant");
   if (assistantMsgs.length >= MAX_BOT_MESSAGES) {
     return { send: null, lock: true, reason: "max_bot_messages_reached" };
   }
 
-  const lang = conversationLanguage(history);
+  // If the webhook resolved a language, use it when it's a hardcoded template
+  // language; otherwise emit the ENGLISH canonical template (which the webhook
+  // then AI-translates before sending). English also keeps identifyTemplate/
+  // currentStage working, since the stored transcript stays in a known language.
+  const lang: Lang = forcedLang
+    ? isHardcodedLang(forcedLang)
+      ? forcedLang
+      : "en"
+    : conversationLanguage(history);
   const stage = currentStage(history);
 
   if (stage === "DONE") {

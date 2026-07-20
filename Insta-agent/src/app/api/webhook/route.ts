@@ -2,9 +2,29 @@ import { NextRequest } from "next/server";
 import crypto from "crypto";
 import { query, queryOne, UNIQUE_VIOLATION } from "@/lib/db";
 import { sendInstagramMessage, fetchInstagramProfile, fetchThreadOpener } from "@/lib/instagram";
-import { decide } from "@/lib/flow";
+import {
+  decide,
+  detectLanguage,
+  isHardcodedLang,
+  yesNoLabels,
+  QR_YES_PAYLOAD,
+  QR_NO_PAYLOAD,
+} from "@/lib/flow";
+import { detectLanguageName, translateTo } from "@/lib/ai";
 import { publishUpdate } from "@/lib/realtime";
 import type { Conversation } from "@/lib/types";
+
+// Map an AI-detected language NAME to a hardcoded template code where one
+// exists, so common languages take the fast deterministic path; anything else
+// keeps its name (e.g. "Telugu") and is handled by AI translation.
+function normalizeLang(name: string): string {
+  const n = name.trim().toLowerCase();
+  if (n.startsWith("eng")) return "en";
+  if (n.startsWith("hind")) return "hi";
+  if (n.startsWith("beng") || n === "bangla") return "bn";
+  if (n.startsWith("marath")) return "mr";
+  return name.trim();
+}
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
@@ -41,7 +61,15 @@ function verifySignature(rawBody: string, signatureHeader: string | null): boole
 interface MessagingEvent {
   sender: { id: string };
   recipient?: { id: string };
-  message?: { text?: string; mid?: string; is_echo?: boolean };
+  message?: {
+    text?: string;
+    mid?: string;
+    is_echo?: boolean;
+    // Present when the creator TAPPED a quick-reply button. The payload
+    // (FLOW_YES / FLOW_NO) tells us their intent regardless of the button
+    // label's language — so Yes/No works in every language.
+    quick_reply?: { payload?: string };
+  };
 }
 
 export async function POST(request: NextRequest) {
@@ -93,7 +121,13 @@ export async function POST(request: NextRequest) {
       continue;
     }
     results.push(
-      await handleMessage(igsid, messaging.message.text, messaging.message.mid, isEcho ? "assistant" : "user")
+      await handleMessage(
+        igsid,
+        messaging.message.text,
+        messaging.message.mid,
+        isEcho ? "assistant" : "user",
+        messaging.message.quick_reply?.payload
+      )
     );
   }
 
@@ -191,7 +225,8 @@ async function handleMessage(
   igsid: string,
   text: string,
   instagramMsgId: string | undefined,
-  role: "user" | "assistant"
+  role: "user" | "assistant",
+  quickReplyPayload?: string
 ): Promise<string> {
   try {
     const conversation = await findOrCreateConversation(igsid);
@@ -245,7 +280,43 @@ async function handleMessage(
       }
     }
 
-    const decision = decide(flowHistory);
+    // Resolve the conversation's language ONCE (cached on the row). Prefer the
+    // opener; the fast hardcoded detector handles en/hi/bn/mr, and only when it
+    // can't tell do we spend one AI call to name the real language (Telugu,
+    // Tamil, …). Everything downstream then speaks that language.
+    let lang = conversation.language ?? null;
+    if (!lang) {
+      const sample =
+        flowHistory.find((m) => m.role === "assistant")?.content ??
+        flowHistory.find((m) => m.role === "user")?.content ??
+        text;
+      const quick = detectLanguage(sample);
+      if (quick !== "en") {
+        lang = quick;
+      } else {
+        const aiName = await detectLanguageName(sample);
+        lang = aiName ? normalizeLang(aiName) : "en";
+      }
+      await queryOne(`UPDATE instagram_conversations SET language = $1 WHERE id = $2`, [
+        lang,
+        conversation.id,
+      ]);
+    }
+
+    // A tapped quick-reply carries its intent in the payload, so classification
+    // is language-proof: normalize the creator's last message to a canonical
+    // yes/no for the flow engine (the real tapped text stays stored for display).
+    if (quickReplyPayload === QR_YES_PAYLOAD || quickReplyPayload === QR_NO_PAYLOAD) {
+      const canonical = quickReplyPayload === QR_YES_PAYLOAD ? "yes" : "no";
+      const lastIdx = flowHistory.length - 1;
+      if (lastIdx >= 0 && flowHistory[lastIdx].role === "user") {
+        flowHistory = flowHistory.map((m, i) =>
+          i === lastIdx ? { ...m, content: canonical } : m
+        );
+      }
+    }
+
+    const decision = decide(flowHistory, lang ?? undefined);
 
     if (decision.capturedPhone) {
       // The number is also the creator's last message in the transcript; log it
@@ -256,8 +327,31 @@ async function handleMessage(
     }
 
     if (decision.send) {
-      const result = await sendInstagramMessage(igsid, decision.send, decision.quickReplies);
-      // Store our send WITH the returned message id so the echo of it is deduped.
+      // decision.send is a hardcoded template (en/hi/bn/mr) or, for any other
+      // language, the ENGLISH canonical text. Translate the canonical text and
+      // localize the buttons for AI languages; on any failure fall back to the
+      // canonical text so the creator still gets a reply.
+      let sendText = decision.send;
+      let quickReplies = decision.quickReplies;
+      if (lang && !isHardcodedLang(lang)) {
+        const translated = await translateTo(decision.send, lang);
+        if (translated) sendText = translated;
+        if (quickReplies) {
+          const labels = yesNoLabels(lang);
+          quickReplies = quickReplies.map((q) =>
+            q.payload === QR_YES_PAYLOAD
+              ? { ...q, title: labels.yes }
+              : q.payload === QR_NO_PAYLOAD
+              ? { ...q, title: labels.no }
+              : q
+          );
+        }
+      }
+
+      const result = await sendInstagramMessage(igsid, sendText, quickReplies);
+      // Store the CANONICAL text (decision.send) so identifyTemplate/currentStage
+      // keep working across languages; the creator saw `sendText`. The echo of
+      // the sent message shares this mid and is deduped.
       const sentMid = (result as { message_id?: string })?.message_id;
       await storeMessage(conversation.id, "assistant", decision.send, sentMid);
       await queryOne(

@@ -8,6 +8,7 @@ export interface Conversation {
   is_user_follow_business: boolean | null;
   is_business_follow_user: boolean | null;
   mode: "agent" | "human";
+  language: string | null;
   updated_at: string;
   created_at: string;
 }

@@ -161,6 +161,66 @@ def api_create_client():
     return jsonify(local_db.get_client(client_id)), 201
 
 
+@app.route("/api/clients/<int:client_id>", methods=["PATCH", "PUT"])
+def api_update_client(client_id):
+    """Edit an existing client. Updates config/<client_key>.json AND the DB row.
+    client_key is the identity (config filename) and is NOT editable here; every
+    other field can be changed. Omitted fields keep their current value."""
+    client = local_db.get_client(client_id)
+    if not client:
+        return jsonify({"error": "unknown client_id"}), 404
+    payload = request.get_json(silent=True) or {}
+    client_key = client["client_key"]
+
+    max_voucher = _to_int(payload.get("max_voucher_inr", client.get("max_voucher_inr") or 2000), None)
+    opening_voucher = _to_int(
+        payload.get("opening_voucher_inr", client.get("opening_voucher_inr") or max_voucher), None
+    )
+    if max_voucher is None or opening_voucher is None:
+        return jsonify({"error": "max_voucher_inr and opening_voucher_inr must be numbers"}), 400
+
+    # Start from the current config (rebuilt from the DB if the file is missing)
+    # so unspecified nested fields survive, then apply the incoming changes.
+    cfg = _client_config(client)
+    client_name = payload.get("client_name", client.get("client_name") or client_key)
+    cfg["client_name"] = client_name
+    cfg["campaign_name"] = payload.get("campaign_name", client.get("campaign_name") or "")
+    cfg["brand_display_name"] = payload.get(
+        "brand_display_name", client.get("brand_display_name") or client_name
+    )
+    cfg["offer_line"] = {"value": payload.get("offer_line", client.get("offer_line") or "")}
+    cfg["default_language"] = payload.get("default_language", client.get("default_language") or "Hindi")
+    cfg.setdefault("phone_regex", r"(?:\+?91[\-\s]?)?[6-9]\d{9}")
+    cfg.setdefault("input_sheet", {"profiles_sheet": "Unique Profiles", "posts_sheet": "All Posts"})
+    cfg["channels"] = {
+        "instagram_dm": bool(payload.get("instagram_enabled", client.get("instagram_enabled"))),
+        "whatsapp": bool(payload.get("whatsapp_enabled", client.get("whatsapp_enabled"))),
+        "facebook_dm": bool(payload.get("facebook_enabled", client.get("facebook_enabled"))),
+    }
+    cfg["compliance_note"] = payload.get("compliance_note", client.get("compliance_note") or "")
+    neg = cfg.get("negotiation", {}) or {}
+    neg.update({
+        "opening_voucher_inr": opening_voucher,
+        "max_voucher_inr": max_voucher,
+        "voucher_type": payload.get("voucher_type", client.get("voucher_type") or "Amazon Voucher"),
+        "reimbursement": payload.get("reimbursement", client.get("reimbursement") or ""),
+        "deliverables": payload.get("deliverables", client.get("deliverables") or ""),
+    })
+    neg.setdefault("human_confirm_before_close", True)
+    cfg["negotiation"] = neg
+
+    config_path = os.path.join(CONFIG_DIR, f"{client_key}.json")
+    try:
+        os.makedirs(CONFIG_DIR, exist_ok=True)
+        with open(config_path, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, indent=2, ensure_ascii=False)
+    except OSError as e:
+        return jsonify({"error": f"failed to write config: {e}"}), 500
+
+    local_db.upsert_client_from_config(cfg, client_key)
+    return jsonify(local_db.get_client(client_id))
+
+
 # --- creators ----------------------------------------------------------
 
 @app.route("/api/creators", methods=["GET"])

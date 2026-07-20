@@ -1478,9 +1478,14 @@ async function refreshWhatsappBadge() {
 
 // --- Clients ────────────────────────────────────────────────────────────────
 
+let _editingClientId = null;
+const _clientsById = {};
+
 async function loadClients() {
   const clients = await api("/api/clients").catch(() => []);
-  document.getElementById("clients-grid").innerHTML = clients.length ? clients.map((c, i) => `
+  for (const c of clients) _clientsById[c.id] = c;
+  const grid = document.getElementById("clients-grid");
+  grid.innerHTML = clients.length ? clients.map((c, i) => `
     <div class="client-card" style="animation: fadeIn 0.4s ${i * 0.06}s ease backwards">
       <h3>${escapeHtml(c.brand_display_name || c.client_name)}</h3>
       <div class="muted">${escapeHtml(c.campaign_name || "No campaign name")}</div>
@@ -1492,8 +1497,58 @@ async function loadClients() {
       <div class="muted" style="margin-top:10px; font-size:11.5px">
         Opens ₹${c.opening_voucher_inr ?? "—"} · Max ₹${c.max_voucher_inr ?? "—"} ${escapeHtml(c.voucher_type || "")}
       </div>
+      <button type="button" class="btn full-width" data-edit-client="${c.id}" style="margin-top:12px">Edit</button>
     </div>
   `).join("") : '<div class="empty-state">No clients yet — add one below.</div>';
+
+  // Wire Edit buttons (addEventListener, not inline onclick — avoids XSS).
+  grid.querySelectorAll("[data-edit-client]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const client = _clientsById[btn.getAttribute("data-edit-client")];
+      if (client) startEditClient(client);
+    });
+  });
+}
+
+// Populate the client form with an existing client's values and switch it into
+// edit mode (submits a PATCH). client_key is the identity, so it's locked.
+function startEditClient(c) {
+  const form = document.getElementById("add-client-form");
+  _editingClientId = c.id;
+  const set = (name, val) => { if (form.elements[name]) form.elements[name].value = val ?? ""; };
+  set("client_key", c.client_key);
+  set("client_name", c.client_name);
+  set("brand_display_name", c.brand_display_name);
+  set("campaign_name", c.campaign_name);
+  set("offer_line", c.offer_line);
+  set("default_language", c.default_language);
+  set("opening_voucher_inr", c.opening_voucher_inr);
+  set("max_voucher_inr", c.max_voucher_inr);
+  set("voucher_type", c.voucher_type);
+  set("reimbursement", c.reimbursement);
+  set("deliverables", c.deliverables);
+  form.elements["whatsapp_enabled"].checked = !!c.whatsapp_enabled;
+  form.elements["instagram_enabled"].checked = !!c.instagram_enabled;
+  form.elements["facebook_enabled"].checked = !!c.facebook_enabled;
+  form.elements["client_key"].readOnly = true;
+
+  document.getElementById("client-form-title").textContent = `Edit Client — ${c.brand_display_name || c.client_name}`;
+  document.getElementById("client-form-submit").textContent = "Save Changes";
+  document.getElementById("client-form-cancel").style.display = "";
+  const msgEl = document.getElementById("add-client-message");
+  msgEl.textContent = ""; msgEl.className = "form-message";
+  form.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+// Reset the client form back to "create" mode.
+function resetClientForm() {
+  const form = document.getElementById("add-client-form");
+  _editingClientId = null;
+  form.reset();
+  form.elements["client_key"].readOnly = false;
+  document.getElementById("client-form-title").textContent = "Add New Client";
+  document.getElementById("client-form-submit").textContent = "+ Create Client";
+  document.getElementById("client-form-cancel").style.display = "none";
 }
 
 function initAddClientForm() {
@@ -1523,11 +1578,19 @@ function initAddClientForm() {
       facebook_enabled:   form.elements["facebook_enabled"].checked,
     };
     try {
-      await api("/api/clients", { method: "POST", body: JSON.stringify(payload) });
-      msgEl.textContent = `✓ Client "${payload.client_key}" created successfully!`;
-      msgEl.className = "form-message success";
-      showToast(`Client "${payload.client_name}" created!`, "success");
-      form.reset();
+      if (_editingClientId) {
+        await api(`/api/clients/${_editingClientId}`, { method: "PATCH", body: JSON.stringify(payload) });
+        msgEl.textContent = `✓ Client "${payload.client_key}" updated!`;
+        msgEl.className = "form-message success";
+        showToast(`Client "${payload.client_name}" updated!`, "success");
+        resetClientForm();
+      } else {
+        await api("/api/clients", { method: "POST", body: JSON.stringify(payload) });
+        msgEl.textContent = `✓ Client "${payload.client_key}" created successfully!`;
+        msgEl.className = "form-message success";
+        showToast(`Client "${payload.client_name}" created!`, "success");
+        form.reset();
+      }
       await loadClientFilter();
       loadClients();
     } catch (err) {
@@ -1538,6 +1601,9 @@ function initAddClientForm() {
       if (submitBtn) submitBtn.disabled = false;
     }
   });
+
+  const cancelBtn = document.getElementById("client-form-cancel");
+  if (cancelBtn) cancelBtn.addEventListener("click", resetClientForm);
 }
 
 // --- Negotiator kill switch ──────────────────────────────────────────────────

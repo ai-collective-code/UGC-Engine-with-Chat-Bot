@@ -644,7 +644,7 @@
         <div class="clients-grid" id="clients-grid"></div>
         <div class="panel">
           <div class="panel-head">
-            <h2>Add New Client</h2>
+            <h2 id="client-form-title">Add New Client</h2>
             <span class="panel-hint">Creates config/&lt;client_key&gt;.json automatically</span>
           </div>
           <form id="add-client-form" class="form-grid">
@@ -664,7 +664,8 @@
               <label class="checkbox-label"><input type="checkbox" name="instagram_enabled" checked> Instagram</label>
               <label class="checkbox-label"><input type="checkbox" name="facebook_enabled"> Facebook</label>
             </div>
-            <button type="submit" class="btn btn-primary full-width">+ Create Client</button>
+            <button type="submit" id="client-form-submit" class="btn btn-primary full-width">+ Create Client</button>
+            <button type="button" id="client-form-cancel" class="btn full-width" style="display:none">Cancel edit</button>
             <div class="form-message" id="add-client-message"></div>
           </form>
         </div>

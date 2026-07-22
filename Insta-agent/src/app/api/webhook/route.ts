@@ -202,7 +202,7 @@ async function findOrCreateConversation(
        (igsid, platform, name, username, profile_pic, follower_count,
         is_user_follow_business, is_business_follow_user)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-     ON CONFLICT (igsid) DO NOTHING
+     ON CONFLICT (platform, igsid) DO NOTHING
      RETURNING *`,
     [
       igsid,

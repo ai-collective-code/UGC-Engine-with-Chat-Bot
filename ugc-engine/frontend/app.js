@@ -1617,14 +1617,16 @@ const BTN_SM = "padding:4px 9px; font-size:11px";
 
 async function loadShops() {
   const clients = await api("/api/clients").catch(() => []);
-  const csel = document.getElementById("shops-client-select");
-  if (csel) {
-    const cur = csel.value;
-    csel.innerHTML = '<option value="">— optional —</option>' + clients.map(
-      (c) => `<option value="${c.id}">${escapeHtml(c.brand_display_name || c.client_name)}</option>`
-    ).join("");
-    csel.value = cur;
-  }
+  const clientOpts = '<option value="">— optional —</option>' + clients.map(
+    (c) => `<option value="${c.id}">${escapeHtml(c.brand_display_name || c.client_name)}</option>`
+  ).join("");
+  ["shops-client-select", "shops-city-client"].forEach((id) => {
+    const sel = document.getElementById(id);
+    if (!sel) return;
+    const cur = sel.value;
+    sel.innerHTML = clientOpts;
+    sel.value = cur;
+  });
 
   // Finalized creators (agreed on WhatsApp = status "Converted"). Each gets a
   // "Find shops" button that auto-sources nearby shops for their location.
@@ -1772,6 +1774,55 @@ function initShopsForm() {
       msgEl.className = "form-message error";
     } finally {
       if (btn) btn.disabled = false;
+    }
+  });
+}
+
+// Standalone city search: type a city -> pull all its tile/hardware shops
+// (name + Google phone number) straight into the call queue. Reuses the same
+// Places-backed /api/shops/nearby endpoint, no creator required.
+function initShopsCityForm() {
+  const form = document.getElementById("shops-city-form");
+  if (!form) return;
+  const msgEl = document.getElementById("shops-city-message");
+  const btn = document.getElementById("shops-city-btn");
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const data = new FormData(form);
+    const city = (data.get("city") || "").trim();
+    if (!city) {
+      msgEl.textContent = "✗ Enter a city name first.";
+      msgEl.className = "form-message error";
+      return;
+    }
+    const keywords = (data.get("keywords") || "")
+      .split(",").map((k) => k.trim()).filter(Boolean);
+    if (btn) { btn.disabled = true; btn.textContent = "Searching Google…"; }
+    msgEl.textContent = "Searching Google Maps — this takes a few seconds…";
+    msgEl.className = "form-message";
+    try {
+      const res = await api("/api/shops/nearby", {
+        method: "POST",
+        body: JSON.stringify({
+          location: city,
+          client_id: Number(data.get("client_id")) || undefined,
+          keywords: keywords.length ? keywords : undefined,
+        }),
+      });
+      if (res.imported > 0) {
+        msgEl.textContent = `✓ Found and added ${res.imported} shop(s) in ${city} to the queue.`;
+        msgEl.className = "form-message success";
+      } else {
+        msgEl.textContent = res.message || `No shops with public phone numbers found in ${city}.`;
+        msgEl.className = "form-message";
+      }
+      loadShops();
+    } catch (err) {
+      // 501 = Google not configured; guide the user to manual paste.
+      msgEl.textContent = `✗ ${err.message}`;
+      msgEl.className = "form-message error";
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = "Search & add to queue"; }
     }
   });
 }
@@ -2362,6 +2413,7 @@ async function init() {
   initFilters();
   initAddClientForm();
   initShopsForm();
+  initShopsCityForm();
   initScrape();
   initAnalyzer();
   initVerify();

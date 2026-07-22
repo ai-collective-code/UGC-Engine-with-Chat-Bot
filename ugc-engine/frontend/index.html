@@ -678,6 +678,19 @@
       <section id="section-shops" class="section" hidden>
         <div class="panel">
           <div class="panel-head">
+            <h2>Search shops by city</h2>
+            <span class="panel-hint">Type any city and pull every tile &amp; hardware shop (name + Google phone number) into the call queue.</span>
+          </div>
+          <form id="shops-city-form" class="form-grid">
+            <label class="full-width">City / area<input name="city" id="shops-city-input" placeholder="Bangalore, Karnataka" autocomplete="off"></label>
+            <label>Client <small>(optional)</small><select name="client_id" id="shops-city-client"></select></label>
+            <label class="full-width">Shop types <small>(comma-separated)</small><input name="keywords" id="shops-city-keywords" value="tiles shop, hardware store" placeholder="tiles shop, hardware store, sanitary ware"></label>
+            <button type="submit" class="btn btn-primary full-width" id="shops-city-btn">Search &amp; add to queue</button>
+            <div class="form-message" id="shops-city-message"></div>
+          </form>
+        </div>
+        <div class="panel">
+          <div class="panel-head">
             <h2>Finalized creators</h2>
             <span class="panel-hint">Creators who agreed on WhatsApp. Click "Find shops" to auto-pull nearby tile/hardware shops for their location.</span>
           </div>

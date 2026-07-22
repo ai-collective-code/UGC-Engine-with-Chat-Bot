@@ -1,7 +1,13 @@
 import { NextRequest } from "next/server";
 import crypto from "crypto";
 import { query, queryOne, UNIQUE_VIOLATION } from "@/lib/db";
-import { sendInstagramMessage, fetchInstagramProfile, fetchThreadOpener } from "@/lib/instagram";
+import {
+  sendInstagramMessage,
+  fetchInstagramProfile,
+  fetchThreadOpener,
+  sendFacebookMessage,
+  fetchFacebookProfile,
+} from "@/lib/instagram";
 import {
   decide,
   detectLanguage,
@@ -58,6 +64,10 @@ function verifySignature(rawBody: string, signatureHeader: string | null): boole
   return crypto.timingSafeEqual(Buffer.from(received, "hex"), Buffer.from(expected, "hex"));
 }
 
+// Which Meta surface a conversation lives on. Stored on the conversation row
+// (platform column) and used to pick the right send/profile Graph calls.
+type Platform = "instagram" | "facebook";
+
 interface MessagingEvent {
   sender: { id: string };
   recipient?: { id: string };
@@ -86,9 +96,14 @@ export async function POST(request: NextRequest) {
     return Response.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  // Only process instagram events for now
-  // TODO: Add facebook_conversations table and facebook-specific handler
-  if (body.object !== "instagram") {
+  // Instagram delivers webhooks with object "instagram"; Facebook Messenger
+  // uses "page". Both share the same entry[].messaging[] shape, so one handler
+  // serves both — we just track which platform to reply through.
+  const platform: Platform | null =
+    body.object === "instagram" ? "instagram"
+    : body.object === "page" ? "facebook"
+    : null;
+  if (!platform) {
     return Response.json({ status: "ignored" });
   }
 
@@ -122,6 +137,7 @@ export async function POST(request: NextRequest) {
     }
     results.push(
       await handleMessage(
+        platform,
         igsid,
         messaging.message.text,
         messaging.message.mid,
@@ -138,16 +154,23 @@ export async function POST(request: NextRequest) {
 
 // Find the conversation for this creator, creating it (with profile) on first
 // contact. Returns null only if the row genuinely can't be found or created.
-async function findOrCreateConversation(igsid: string): Promise<Conversation | null> {
+async function findOrCreateConversation(
+  platform: Platform,
+  igsid: string
+): Promise<Conversation | null> {
+  // Instagram and Facebook use different Graph endpoints for the same purpose;
+  // pick the matching profile fetcher up front.
+  const fetchProfile = platform === "facebook" ? fetchFacebookProfile : fetchInstagramProfile;
+
   const existing = await queryOne<Conversation>(
-    `SELECT * FROM instagram_conversations WHERE igsid = $1`,
-    [igsid]
+    `SELECT * FROM instagram_conversations WHERE igsid = $1 AND platform = $2`,
+    [igsid, platform]
   );
 
   if (existing) {
     // Refresh profile; skip the update on Graph failure so a transient error
     // can't wipe stored fields to null.
-    const profile = await fetchInstagramProfile(igsid);
+    const profile = await fetchProfile(igsid);
     if (profile) {
       const updated = await queryOne<Conversation>(
         `UPDATE instagram_conversations
@@ -170,19 +193,20 @@ async function findOrCreateConversation(igsid: string): Promise<Conversation | n
     return existing;
   }
 
-  const profile = await fetchInstagramProfile(igsid);
+  const profile = await fetchProfile(igsid);
   // ON CONFLICT DO NOTHING handles two concurrent first-messages racing the
   // insert: the loser gets no RETURNING row, and the follow-up SELECT finds the
   // winner's row.
   const created = await queryOne<Conversation>(
     `INSERT INTO instagram_conversations
-       (igsid, name, username, profile_pic, follower_count,
+       (igsid, platform, name, username, profile_pic, follower_count,
         is_user_follow_business, is_business_follow_user)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
      ON CONFLICT (igsid) DO NOTHING
      RETURNING *`,
     [
       igsid,
+      platform,
       profile?.name ?? null,
       profile?.username ?? null,
       profile?.profile_pic ?? null,
@@ -194,8 +218,8 @@ async function findOrCreateConversation(igsid: string): Promise<Conversation | n
   if (created) return created;
 
   return queryOne<Conversation>(
-    `SELECT * FROM instagram_conversations WHERE igsid = $1`,
-    [igsid]
+    `SELECT * FROM instagram_conversations WHERE igsid = $1 AND platform = $2`,
+    [igsid, platform]
   );
 }
 
@@ -222,6 +246,7 @@ async function storeMessage(
 }
 
 async function handleMessage(
+  platform: Platform,
   igsid: string,
   text: string,
   instagramMsgId: string | undefined,
@@ -229,7 +254,7 @@ async function handleMessage(
   quickReplyPayload?: string
 ): Promise<string> {
   try {
-    const conversation = await findOrCreateConversation(igsid);
+    const conversation = await findOrCreateConversation(platform, igsid);
     if (!conversation) {
       console.error("[webhook] Failed to find or create conversation for", igsid);
       return "conversation_failed";
@@ -273,7 +298,7 @@ async function handleMessage(
     // Pull the real opener from the Graph API and prepend it so the reply goes
     // out in the opener's language. Only needed on the first reply.
     let flowHistory = chronological;
-    if (!chronological.some((m) => m.role === "assistant")) {
+    if (platform === "instagram" && !chronological.some((m) => m.role === "assistant")) {
       const opener = await fetchThreadOpener(igsid);
       if (opener) {
         flowHistory = [{ role: "assistant" as const, content: opener }, ...chronological];
@@ -348,7 +373,11 @@ async function handleMessage(
         }
       }
 
-      const result = await sendInstagramMessage(igsid, sendText, quickReplies);
+      // Reply through the same platform the creator messaged on. Both send
+      // functions share the (id, text, quickReplies?) signature and return a
+      // Graph response carrying message_id, so the rest is platform-agnostic.
+      const send = platform === "facebook" ? sendFacebookMessage : sendInstagramMessage;
+      const result = await send(igsid, sendText, quickReplies);
       // Store the CANONICAL text (decision.send) so identifyTemplate/currentStage
       // keep working across languages; the creator saw `sendText`. The echo of
       // the sent message shares this mid and is deduped.

@@ -135,9 +135,60 @@ export async function sendInstagramMessage(
   return data;
 }
 
-export async function sendFacebookMessage(recipientId: string, text: string) {
+// Fetch a Messenger user's (PSID) profile via the Page token. Messenger exposes
+// first/last name + picture (no username/followers like Instagram), so those
+// fields come back null. Returns null on any Graph failure so a transient error
+// never wipes stored fields — same contract as fetchInstagramProfile.
+export async function fetchFacebookProfile(psid: string): Promise<InstagramProfile | null> {
+  try {
+    const url = new URL(`https://graph.facebook.com/v20.0/${psid}`);
+    url.searchParams.set("fields", "first_name,last_name,profile_pic");
+    url.searchParams.set("access_token", requireEnv("FACEBOOK_ACCESS_TOKEN"));
+
+    const res = await fetch(url.toString());
+    const data = await res.json();
+
+    if (!res.ok || data.error) {
+      console.warn(`[facebook] Profile fetch failed for ${psid}: ${data.error?.message || res.status}`);
+      return null;
+    }
+
+    const name = [data.first_name, data.last_name].filter(Boolean).join(" ") || null;
+    return {
+      name,
+      username: null,
+      profile_pic: data.profile_pic ?? null,
+      follower_count: null,
+      is_user_follow_business: null,
+      is_business_follow_user: null,
+    };
+  } catch (err) {
+    console.warn(`[facebook] Profile fetch threw for ${psid}:`, err);
+    return null;
+  }
+}
+
+// Messenger uses the same quick_replies shape as Instagram, so Yes/No buttons
+// work identically. Caps match Meta's (<=13 buttons, title <=20 chars).
+export async function sendFacebookMessage(
+  recipientId: string,
+  text: string,
+  quickReplies?: QuickReplyButton[]
+) {
   const url = new URL("https://graph.facebook.com/v20.0/me/messages");
   url.searchParams.set("access_token", requireEnv("FACEBOOK_ACCESS_TOKEN"));
+
+  const message: {
+    text: string;
+    quick_replies?: { content_type: "text"; title: string; payload: string }[];
+  } = { text };
+  if (quickReplies?.length) {
+    message.quick_replies = quickReplies.map((q) => ({
+      content_type: "text",
+      title: q.title.slice(0, 20),
+      payload: q.payload,
+    }));
+  }
 
   const res = await fetch(url.toString(), {
     method: "POST",
@@ -145,7 +196,7 @@ export async function sendFacebookMessage(recipientId: string, text: string) {
     body: JSON.stringify({
       recipient: { id: recipientId },
       messaging_type: "RESPONSE",
-      message: { text },
+      message,
     }),
   });
   const data = await res.json();

@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { queryOne } from "@/lib/db";
-import { sendInstagramMessage } from "@/lib/instagram";
+import { sendInstagramMessage, sendFacebookMessage } from "@/lib/instagram";
 import { checkSendRate, recordSend } from "@/lib/rate-limiter";
 import { publishUpdate } from "@/lib/realtime";
 import type { Conversation, Message } from "@/lib/types";
@@ -34,11 +34,11 @@ export async function POST(
     );
   }
 
-  // Get conversation to find igsid
-  let conversation: Pick<Conversation, "igsid"> | null;
+  // Get conversation to find igsid + which platform to reply through.
+  let conversation: Pick<Conversation, "igsid" | "platform"> | null;
   try {
-    conversation = await queryOne<Pick<Conversation, "igsid">>(
-      `SELECT igsid FROM instagram_conversations WHERE id = $1`,
+    conversation = await queryOne<Pick<Conversation, "igsid" | "platform">>(
+      `SELECT igsid, platform FROM instagram_conversations WHERE id = $1`,
       [id]
     );
   } catch (err) {
@@ -50,13 +50,16 @@ export async function POST(
     return Response.json({ error: "Conversation not found" }, { status: 404 });
   }
 
-  // Send via Instagram. Only count the send against the hourly quota once it
-  // actually succeeded — a failed send (expired token, outside the 24h reply
-  // window) must not burn one of the 3 slots.
+  // Reply through the same platform the creator is on (Messenger uses the Page
+  // token, Instagram the IG token). Only count the send against the hourly quota
+  // once it actually succeeded — a failed send (expired token, outside the 24h
+  // reply window) must not burn one of the 3 slots.
   try {
-    await sendInstagramMessage(conversation.igsid, message);
+    const send =
+      conversation.platform === "facebook" ? sendFacebookMessage : sendInstagramMessage;
+    await send(conversation.igsid, message);
   } catch (err) {
-    const detail = err instanceof Error ? err.message : "Instagram send failed";
+    const detail = err instanceof Error ? err.message : "Send failed";
     return Response.json({ error: detail }, { status: 502 });
   }
   recordSend(id);

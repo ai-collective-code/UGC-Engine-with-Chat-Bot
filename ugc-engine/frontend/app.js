@@ -1873,7 +1873,7 @@ function initRefreshButton() {
 // --- Profile Analyzer ───────────────────────────────────────────────────────
 
 let analyzerPolling = false;
-let analyzerInterval = null;
+let analyzerInterval = null;  // setTimeout handle for the self-scheduling poll
 
 function setAnalyzerStatus(text, cls) {
   const el = document.getElementById("analyzer-status");
@@ -1914,9 +1914,20 @@ async function startAnalyzer(username = null) {
   }
 
   const btn = document.getElementById("analyzer-btn");
+  // Claim the slot BEFORE the first await. Setting this only after the POST
+  // resolved left a window where a second click (or an analyzeUser() call from
+  // another tab) started a whole extra Apify run -- billable, and it left the
+  // first run orphaned.
+  analyzerPolling = true;
   btn.disabled = true;
   document.getElementById("analyzer-result").style.display = "none";
   setAnalyzerStatus("Starting profile analysis...", "");
+
+  const finish = (message, kind) => {
+    analyzerPolling = false;
+    btn.disabled = false;
+    setAnalyzerStatus(message || "", kind || "");
+  };
 
   try {
     const res = await api("/api/analyze-profile", {
@@ -1924,45 +1935,68 @@ async function startAnalyzer(username = null) {
       body: JSON.stringify({ client_id: clientId, username: target })
     });
 
+    if (res.error) {
+      finish(res.error, "error");
+      return;
+    }
+
     if (res.status === "CACHED" && res.result) {
       renderAnalyzerResult(target, res.result);
-      setAnalyzerStatus("");
-      btn.disabled = false;
+      finish();
       return;
     }
 
     const runId = res.run_id;
-    analyzerPolling = true;
-    setAnalyzerStatus("Scraping profile data & analyzing with AI...", "");
-    
-    clearInterval(analyzerInterval);
-    analyzerInterval = setInterval(async () => {
+    if (!runId) {
+      finish("The scrape did not start — no run id was returned.", "error");
+      return;
+    }
+    setAnalyzerStatus("Scraping the profile from Instagram…");
+
+    // Self-scheduling poll instead of setInterval: the status call runs the AI
+    // evaluation synchronously once the scrape lands, which can take tens of
+    // seconds. A fixed interval fired straight over the top of it, so a single
+    // analysis spawned a pile of overlapping requests -- each burning AI quota
+    // and writing its own duplicate row. Chaining the next poll only after the
+    // previous one settles makes overlap structurally impossible.
+    clearTimeout(analyzerInterval);
+    const started = Date.now();
+    let scrapeDone = false;
+
+    const poll = async () => {
       try {
         const pRes = await api(`/api/analyze-profile/status?run_id=${runId}&client_id=${clientId}&username=${encodeURIComponent(target)}`);
-        if (pRes.status === "SUCCEEDED" && pRes.result) {
-          clearInterval(analyzerInterval);
-          analyzerPolling = false;
-          btn.disabled = false;
-          setAnalyzerStatus("");
+
+        if (pRes.result) {
           renderAnalyzerResult(target, pRes.result);
-        } else if (pRes.error) {
-          clearInterval(analyzerInterval);
-          analyzerPolling = false;
-          btn.disabled = false;
-          setAnalyzerStatus(`Analysis failed: ${pRes.error}`, "error");
-        } else {
-          setAnalyzerStatus(`AI is analyzing profile... (${pRes.status})`);
+          finish();
+          return;
         }
+        if (pRes.error) {
+          finish(pRes.error, "error");
+          return;
+        }
+
+        // Distinguish the two waits, because they have very different lengths and
+        // a single "analyzing…" label made a working run look frozen.
+        const secs = Math.round((Date.now() - started) / 1000);
+        if (pRes.status === "SUCCEEDED" && !scrapeDone) {
+          scrapeDone = true;
+          setAnalyzerStatus(`Profile scraped — evaluating it against the campaign… (${secs}s)`);
+        } else if (scrapeDone) {
+          setAnalyzerStatus(`Evaluating against the campaign… (${secs}s)`);
+        } else {
+          setAnalyzerStatus(`Scraping the profile from Instagram… (${secs}s)`);
+        }
+        analyzerInterval = setTimeout(poll, 3000);
       } catch (err) {
-        clearInterval(analyzerInterval);
-        analyzerPolling = false;
-        btn.disabled = false;
-        setAnalyzerStatus(`Error checking status: ${err.message}`, "error");
+        finish(`Error checking status: ${err.message}`, "error");
       }
-    }, 4000);
+    };
+
+    analyzerInterval = setTimeout(poll, 2000);
   } catch (err) {
-    btn.disabled = false;
-    setAnalyzerStatus(err.message, "error");
+    finish(err.message, "error");
   }
 }
 

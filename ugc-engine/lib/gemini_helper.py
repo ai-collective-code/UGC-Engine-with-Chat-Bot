@@ -65,8 +65,29 @@ def _build_chain():
 
 MODEL_CHAIN = _build_chain()
 
+# Per-request ceiling for a single model attempt. Without one, the SDK waits far
+# longer than any UI can tolerate: a model returning 504 Deadline Exceeded blocks
+# for minutes, and because the chain then tries the remaining models in sequence,
+# one sick model turned a 2-second analysis into a 2-minute one. Bounding each
+# attempt means a hung model costs this many seconds, not the whole request.
+TIMEOUT_SECONDS = int(os.environ.get("GEMINI_TIMEOUT_SECONDS", "20"))
+
 # Exposed so callers can show "which model answered" for debugging.
 last_model_used = None
+
+# The chain is ordered by expected free-tier headroom, but which models actually
+# have budget changes through the day -- and the healthy one can easily be last,
+# behind several exhausted or timing-out models. Remembering the model that last
+# answered and trying it first makes every call after the first one fast, instead
+# of re-walking the same dead models on every single request.
+_preferred_model = None
+
+
+def _ordered_chain():
+    """MODEL_CHAIN with the last known-good model moved to the front."""
+    if not _preferred_model or _preferred_model not in MODEL_CHAIN:
+        return MODEL_CHAIN
+    return [_preferred_model] + [m for m in MODEL_CHAIN if m != _preferred_model]
 
 
 def is_configured():
@@ -90,7 +111,7 @@ def generate_text(system_prompt, user_prompt, json_mode=False, max_output_tokens
     RuntimeError only if every model errors -- with a quota-specific message when
     that's the cause, so the API layer can surface a clean 502.
     """
-    global last_model_used
+    global last_model_used, _preferred_model
     if not is_configured():
         raise RuntimeError("Gemini API key is not configured. Add GEMINI_API_KEY to .env")
 
@@ -102,14 +123,16 @@ def generate_text(system_prompt, user_prompt, json_mode=False, max_output_tokens
 
     errors = []
     quota_hit = False
-    for model_name in MODEL_CHAIN:
+    for model_name in _ordered_chain():
         try:
             model = genai.GenerativeModel(
                 model_name=model_name,
                 system_instruction=system_prompt,
                 generation_config=gen_config or None,
             )
-            resp = model.generate_content(user_prompt)
+            resp = model.generate_content(
+                user_prompt, request_options={"timeout": TIMEOUT_SECONDS}
+            )
             text = (resp.text or "").strip()
             if not text:
                 # Empty completion (e.g. a reasoning model that burned its budget
@@ -117,15 +140,21 @@ def generate_text(system_prompt, user_prompt, json_mode=False, max_output_tokens
                 errors.append(f"{model_name}: empty response")
                 continue
             last_model_used = model_name
+            _preferred_model = model_name  # try this one first next time
             return text
         except Exception as e:
             msg = str(e)
+            # A model that just failed must not stay at the front of the queue, or
+            # every later call pays its timeout again before reaching a live one.
+            if _preferred_model == model_name:
+                _preferred_model = None
             if _is_quota_error(msg):
                 quota_hit = True
                 errors.append(f"{model_name}: quota exhausted")
                 continue  # roll to the next model's separate daily bucket
-            # 404 (model not enabled for this key) or other transient error --
-            # skip to the next model rather than failing the whole request.
+            # Timeout (504/deadline), 404 (model not enabled for this key), or any
+            # other transient error -- skip to the next model rather than failing
+            # the whole request.
             errors.append(f"{model_name}: {msg[:80]}")
             continue
 

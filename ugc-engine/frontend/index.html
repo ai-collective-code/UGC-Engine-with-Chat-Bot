@@ -256,16 +256,20 @@
 
         <div id="analyzer-result" style="display:none; animation: fadeIn 0.4s ease;">
           <div class="panel">
+            <!-- Verdict header -->
             <div class="two-col" style="align-items: start; gap: 24px;">
               <div>
-                <div style="display:flex; align-items:center; gap:12px; margin-bottom: 16px;">
+                <div style="display:flex; align-items:center; gap:12px; margin-bottom: 4px; flex-wrap:wrap;">
                   <h2 id="analyzer-res-username" style="font-size: 20px; font-weight:800; color:var(--text-bright);">@username</h2>
                   <span id="analyzer-res-verdict" class="badge"></span>
+                  <span id="analyzer-res-confidence" class="badge" style="background:rgba(255,255,255,0.06); color:var(--text-muted);"></span>
                 </div>
+                <p id="analyzer-res-fullname" style="color:var(--text-muted); font-size:12.5px; margin:0 0 12px;"></p>
                 <div style="font-size:42px; font-weight:900; color:var(--accent); line-height:1; margin-bottom: 8px;">
                   <span id="analyzer-res-score">0</span><span style="font-size:20px; color:var(--text-muted)">/10</span>
                 </div>
                 <p id="analyzer-res-summary" style="color:var(--text-secondary); font-size: 13.5px; line-height: 1.6;"></p>
+                <p id="analyzer-res-bio" style="color:var(--text-muted); font-size:12.5px; line-height:1.55; margin-top:12px; white-space:pre-wrap;"></p>
               </div>
               <div style="display:flex; flex-direction:column; gap:16px; background: rgba(99, 179, 237, 0.03); padding: 18px; border-radius: var(--radius-md); border: 1px solid var(--border);">
                 <div>
@@ -276,7 +280,78 @@
                   <h4 style="color:var(--accent-red); font-size:12px; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:8px; font-weight:700;">⚠️ Cons</h4>
                   <ul id="analyzer-res-cons" style="list-style:none; padding:0; margin:0; font-size:12.5px; color:var(--text-secondary); display:flex; flex-direction:column; gap:6px;"></ul>
                 </div>
+                <div id="analyzer-res-riskwrap" style="display:none;">
+                  <h4 style="color:var(--accent-red); font-size:12px; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:8px; font-weight:700;">🚩 Risk flags</h4>
+                  <ul id="analyzer-res-risks" style="list-style:none; padding:0; margin:0; font-size:12.5px; color:var(--text-secondary); display:flex; flex-direction:column; gap:6px;"></ul>
+                </div>
               </div>
+            </div>
+          </div>
+
+          <!-- Measured metrics -->
+          <div class="panel">
+            <div class="panel-head">
+              <h3>📊 Measured account data</h3>
+              <p class="panel-sub" id="analyzer-res-basis">Computed from the scraped profile — not AI-generated.</p>
+            </div>
+            <div id="analyzer-metrics-grid" class="metric-grid"></div>
+            <p id="analyzer-res-hiddenlikes" style="display:none; color:var(--accent-amber, #d9a24b); font-size:12px; margin-top:12px;"></p>
+          </div>
+
+          <!-- Qualitative read -->
+          <div class="panel">
+            <div class="panel-head">
+              <h3>🧠 Analyst read</h3>
+              <p class="panel-sub">How this creator's audience, content and engagement line up with the campaign.</p>
+            </div>
+            <div style="display:flex; flex-direction:column; gap:18px;">
+              <div>
+                <h4 style="color:var(--text-muted); font-size:11px; text-transform:uppercase; letter-spacing:0.06em; margin-bottom:6px; font-weight:700;">Who actually follows them</h4>
+                <p id="analyzer-res-audience" style="color:var(--text-secondary); font-size:13px; line-height:1.6; margin:0;"></p>
+              </div>
+              <div>
+                <h4 style="color:var(--text-muted); font-size:11px; text-transform:uppercase; letter-spacing:0.06em; margin-bottom:6px; font-weight:700;">Engagement quality</h4>
+                <p id="analyzer-res-engquality" style="color:var(--text-secondary); font-size:13px; line-height:1.6; margin:0;"></p>
+              </div>
+              <div>
+                <h4 style="color:var(--text-muted); font-size:11px; text-transform:uppercase; letter-spacing:0.06em; margin-bottom:6px; font-weight:700;">Brand fit</h4>
+                <p id="analyzer-res-brandfit" style="color:var(--text-secondary); font-size:13px; line-height:1.6; margin:0;"></p>
+              </div>
+              <div>
+                <h4 style="color:var(--text-muted); font-size:11px; text-transform:uppercase; letter-spacing:0.06em; margin-bottom:6px; font-weight:700;">What they post about</h4>
+                <div id="analyzer-res-themes" style="display:flex; flex-wrap:wrap; gap:6px;"></div>
+              </div>
+              <div id="analyzer-res-hashtagwrap">
+                <h4 style="color:var(--text-muted); font-size:11px; text-transform:uppercase; letter-spacing:0.06em; margin-bottom:6px; font-weight:700;">Hashtags they use</h4>
+                <div id="analyzer-res-hashtags" style="display:flex; flex-wrap:wrap; gap:6px;"></div>
+              </div>
+              <div id="analyzer-res-locwrap">
+                <h4 style="color:var(--text-muted); font-size:11px; text-transform:uppercase; letter-spacing:0.06em; margin-bottom:6px; font-weight:700;">Locations they tag</h4>
+                <div id="analyzer-res-locations" style="display:flex; flex-wrap:wrap; gap:6px;"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Actionable next step -->
+          <div class="panel">
+            <div class="panel-head">
+              <h3>🎯 Recommended action</h3>
+              <p class="panel-sub">A starting offer and an opening line, sized to this creator's actual reach.</p>
+            </div>
+            <div class="two-col" style="gap:20px; align-items:start;">
+              <div>
+                <h4 style="color:var(--text-muted); font-size:11px; text-transform:uppercase; letter-spacing:0.06em; margin-bottom:6px; font-weight:700;">Suggested offer</h4>
+                <p id="analyzer-res-offer" style="color:var(--text-bright); font-size:14px; font-weight:600; line-height:1.5; margin:0;"></p>
+              </div>
+              <div>
+                <h4 style="color:var(--text-muted); font-size:11px; text-transform:uppercase; letter-spacing:0.06em; margin-bottom:6px; font-weight:700;">Opening line for the DM</h4>
+                <p id="analyzer-res-angle" style="color:var(--text-secondary); font-size:13px; line-height:1.6; margin:0; font-style:italic;"></p>
+              </div>
+            </div>
+            <div id="analyzer-res-toppost" style="display:none; margin-top:20px; padding-top:18px; border-top:1px solid var(--border);">
+              <h4 style="color:var(--text-muted); font-size:11px; text-transform:uppercase; letter-spacing:0.06em; margin-bottom:8px; font-weight:700;">Their best-performing recent post</h4>
+              <p id="analyzer-res-toppost-caption" style="color:var(--text-secondary); font-size:12.5px; line-height:1.55; margin:0 0 6px;"></p>
+              <p id="analyzer-res-toppost-stats" style="color:var(--text-muted); font-size:12px; margin:0;"></p>
             </div>
           </div>
         </div>

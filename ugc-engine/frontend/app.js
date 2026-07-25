@@ -1966,21 +1966,148 @@ async function startAnalyzer(username = null) {
   }
 }
 
+// Format a count for display, keeping "not available" visibly different from
+// zero -- a post with 0 comments and a post whose likes are hidden are very
+// different facts, and collapsing both to "0" is what made earlier reports
+// misleading.
+function fmtMetric(value, suffix = "") {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "number") {
+    const rounded = Number.isInteger(value) ? value : Math.round(value * 100) / 100;
+    return `${rounded.toLocaleString("en-IN")}${suffix}`;
+  }
+  return `${value}${suffix}`;
+}
+
+function metricTile(label, value, sub) {
+  const shown = value === null || value === undefined;
+  return `<div class="metric-tile">
+    <div class="metric-tile-label">${escapeHtml(label)}</div>
+    <div class="metric-tile-value${shown ? " is-unknown" : ""}">${shown ? "not available" : escapeHtml(String(value))}</div>
+    ${sub ? `<div class="metric-tile-sub">${escapeHtml(sub)}</div>` : ""}
+  </div>`;
+}
+
+function chipList(elId, values, wrapId) {
+  const el = document.getElementById(elId);
+  const list = values || [];
+  el.innerHTML = list.map(v => `<span class="tag-chip">${escapeHtml(String(v))}</span>`).join("");
+  if (wrapId) {
+    document.getElementById(wrapId).style.display = list.length ? "" : "none";
+  }
+}
+
 function renderAnalyzerResult(username, result) {
   const resultDiv = document.getElementById("analyzer-result");
   resultDiv.style.display = "block";
-  
-  document.getElementById("analyzer-res-username").textContent = `@${username}`;
-  
-  const scoreBadge = document.getElementById("analyzer-res-verdict");
-  scoreBadge.textContent = result.verdict || "Reviewed";
-  scoreBadge.className = `badge ${result.verdict === 'Recommended' ? 'badge-good' : 'badge-critical'}`;
-  
-  document.getElementById("analyzer-res-score").textContent = result.score || "0";
+  const m = result.metrics || {};
+
+  document.getElementById("analyzer-res-username").textContent = `@${m.username || username}`;
+  // Apify sends the literal strings "None"/"null" for fields it couldn't read,
+  // which pass a plain truthiness check and render as text.
+  const realValue = v => {
+    const s = (v ?? "").toString().trim();
+    return s && !["none", "null", "undefined"].includes(s.toLowerCase()) ? s : "";
+  };
+  document.getElementById("analyzer-res-fullname").textContent =
+    [realValue(m.full_name), realValue(m.business_category)].filter(Boolean).join(" · ");
+
+  const verdict = result.verdict || "Reviewed";
+  const verdictBadge = document.getElementById("analyzer-res-verdict");
+  verdictBadge.textContent = verdict;
+  // Three-way verdict: "Worth a test" is neither a green light nor a rejection.
+  const verdictClass = verdict === "Recommended" ? "badge-good"
+    : verdict === "Not Recommended" ? "badge-critical"
+    : "badge-warning";
+  verdictBadge.className = `badge ${verdictClass}`;
+
+  const conf = document.getElementById("analyzer-res-confidence");
+  conf.textContent = result.confidence ? `${result.confidence} confidence` : "";
+  conf.style.display = result.confidence ? "" : "none";
+
+  document.getElementById("analyzer-res-score").textContent = result.score ?? "0";
   document.getElementById("analyzer-res-summary").textContent = result.summary || "";
-  
-  document.getElementById("analyzer-res-pros").innerHTML = (result.pros || []).map(p => `<li>• ${escapeHtml(p)}</li>`).join("");
-  document.getElementById("analyzer-res-cons").innerHTML = (result.cons || []).map(c => `<li>• ${escapeHtml(c)}</li>`).join("");
+  document.getElementById("analyzer-res-bio").textContent = m.biography || "";
+
+  document.getElementById("analyzer-res-pros").innerHTML =
+    (result.pros || []).map(p => `<li>• ${escapeHtml(p)}</li>`).join("")
+    || `<li style="color:var(--text-muted)">Nothing notable in favour.</li>`;
+  document.getElementById("analyzer-res-cons").innerHTML =
+    (result.cons || []).map(c => `<li>• ${escapeHtml(c)}</li>`).join("")
+    || `<li style="color:var(--text-muted)">No concerns raised.</li>`;
+
+  const risks = result.risk_flags || [];
+  document.getElementById("analyzer-res-riskwrap").style.display = risks.length ? "" : "none";
+  document.getElementById("analyzer-res-risks").innerHTML =
+    risks.map(r => `<li>• ${escapeHtml(r)}</li>`).join("");
+
+  // Measured figures. Engagement gets its band as a subtitle so the number is
+  // interpretable without knowing Instagram benchmarks.
+  const cadence = m.median_days_between_posts;
+  document.getElementById("analyzer-metrics-grid").innerHTML = [
+    metricTile("Followers", fmtMetric(m.followers)),
+    metricTile("Following", fmtMetric(m.following),
+      m.follower_following_ratio !== null && m.follower_following_ratio !== undefined
+        ? `${m.follower_following_ratio}× ratio` : null),
+    metricTile("Posts on account", fmtMetric(m.posts_count)),
+    metricTile("Engagement rate", fmtMetric(m.engagement_rate, "%"),
+      m.engagement_rate === null || m.engagement_rate === undefined ? null : m.engagement_band),
+    metricTile("Avg likes", fmtMetric(m.avg_likes)),
+    metricTile("Avg comments", fmtMetric(m.avg_comments)),
+    metricTile("Avg views", fmtMetric(m.avg_views),
+      m.view_reach_pct ? `${m.view_reach_pct}% of followers` : null),
+    metricTile("Comment / like", fmtMetric(m.comment_to_like_ratio, "%"),
+      m.comment_to_like_ratio === null || m.comment_to_like_ratio === undefined
+        ? null : "authenticity signal"),
+    metricTile("Posting rhythm",
+      cadence === null || cadence === undefined ? null
+        : cadence === 0 ? "same day" : `every ${cadence}d`),
+    metricTile("Last posted",
+      m.days_since_last_post === null || m.days_since_last_post === undefined ? null
+        : m.days_since_last_post === 0 ? "today" : `${m.days_since_last_post}d ago`),
+    metricTile("Verified", m.verified ? "Yes" : "No"),
+    metricTile("Account type", m.is_business ? "Business" : "Personal"),
+  ].join("");
+
+  document.getElementById("analyzer-res-basis") .textContent =
+    `Computed from ${m.posts_sampled ?? 0} recent posts — measured, not AI-generated.`;
+
+  // Explain an unknown like count rather than leaving a silent blank.
+  const hidden = document.getElementById("analyzer-res-hiddenlikes");
+  if (m.likes_hidden_on) {
+    hidden.style.display = "";
+    hidden.textContent = `⚠️ This creator hides like counts on ${m.likes_hidden_on} of ${m.posts_sampled} posts, `
+      + `so the engagement rate is based on ${m.engagement_basis || "comments only"}. `
+      + `Hidden likes are not the same as low likes.`;
+  } else {
+    hidden.style.display = "none";
+  }
+
+  document.getElementById("analyzer-res-audience").textContent = result.audience_read || "—";
+  document.getElementById("analyzer-res-engquality").textContent = result.engagement_quality || "—";
+  document.getElementById("analyzer-res-brandfit").textContent = result.brand_fit_notes || "—";
+  document.getElementById("analyzer-res-offer").textContent = result.recommended_offer || "—";
+  document.getElementById("analyzer-res-angle").textContent =
+    result.outreach_angle ? `"${result.outreach_angle}"` : "—";
+
+  chipList("analyzer-res-themes", result.content_themes);
+  chipList("analyzer-res-hashtags", m.content_hashtags, "analyzer-res-hashtagwrap");
+  chipList("analyzer-res-locations", m.post_locations, "analyzer-res-locwrap");
+
+  const tp = m.top_post;
+  const tpWrap = document.getElementById("analyzer-res-toppost");
+  if (tp && (tp.caption || tp.likes !== null || tp.views !== null)) {
+    tpWrap.style.display = "";
+    document.getElementById("analyzer-res-toppost-caption").textContent = tp.caption || "(no caption)";
+    const stats = [
+      tp.likes !== null && tp.likes !== undefined ? `${tp.likes.toLocaleString("en-IN")} likes` : null,
+      tp.comments !== null && tp.comments !== undefined ? `${tp.comments.toLocaleString("en-IN")} comments` : null,
+      tp.views !== null && tp.views !== undefined ? `${tp.views.toLocaleString("en-IN")} views` : null,
+    ].filter(Boolean).join(" · ");
+    document.getElementById("analyzer-res-toppost-stats").textContent = stats || "engagement not available";
+  } else {
+    tpWrap.style.display = "none";
+  }
 }
 
 window.analyzeUser = async function(username) {

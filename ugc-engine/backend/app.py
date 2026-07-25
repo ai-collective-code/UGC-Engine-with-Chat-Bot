@@ -50,6 +50,11 @@ INSTAGRAM_ACTOR = os.environ.get("APIFY_INSTAGRAM_ACTOR", "apify~instagram-reel-
 # Its items expose the same ownerUsername/caption/hashtags fields the reel scraper
 # does, so store_apify_items imports them unchanged.
 INSTAGRAM_HASHTAG_ACTOR = os.environ.get("APIFY_INSTAGRAM_HASHTAG_ACTOR", "apify~instagram-hashtag-scraper")
+# Apify actor for single-creator evaluation (apify/instagram-profile-scraper). The
+# reel scraper above returns individual reels, which carry no followersCount,
+# followsCount or biography -- so profile analysis and creator verification must
+# use this actor instead, or every report reads "follower data unknown".
+INSTAGRAM_PROFILE_ACTOR = os.environ.get("APIFY_INSTAGRAM_PROFILE_ACTOR", "apify~instagram-profile-scraper")
 _scrape_imported = set()  # run_ids already imported, so re-polling doesn't re-import
 _scrape_imported_lock = threading.Lock()  # guards the set under Flask's threaded server
 
@@ -893,31 +898,60 @@ def api_message_variations():
 
 # --- profile analyzer ------------------------------------------------------
 
+def _profile_from_items(items):
+    """Pick the profile object out of an Apify dataset, or raise with the real
+    reason it's unusable.
+
+    Apify reports an unreachable target by writing an ERROR OBJECT into the
+    dataset ({"error": "no_items", ...}) rather than returning an empty one. An
+    unguarded items[0] therefore looks like a valid-but-blank profile, and
+    passing that to the model yields a confident invented verdict. Callers must
+    go through here so a failed scrape reads as a failure.
+    """
+    if not items:
+        raise profile_analyzer.ProfileDataError("Profile not found, or the account has no public posts.")
+    profile = next(
+        (it for it in items if not it.get("error") and (it.get("username") or it.get("followersCount") is not None)),
+        None,
+    )
+    if profile is None:
+        first = items[0]
+        raise profile_analyzer.ProfileDataError(
+            first.get("errorDescription")
+            or "Instagram returned no data for this handle (private, deleted, or misspelled)."
+        )
+    profile = profile.copy()
+    # The profile actor nests its own recent posts; only fall back to the raw
+    # dataset rows when it didn't, so we never clobber good post data.
+    if not profile.get("latestPosts"):
+        profile["latestPosts"] = [it for it in items if it.get("likesCount") is not None]
+    return profile
+
+
 @app.route("/api/analyze-profile", methods=["POST"])
 def api_analyze_profile():
     payload = request.get_json(silent=True) or {}
     client_id = payload.get("client_id")
-    username = str(payload.get("username") or "").strip().lower()
-    
+    username = str(payload.get("username") or "").strip().lstrip("@").lower()
+
     if not username or not client_id:
         return jsonify({"error": "client_id and username are required"}), 400
-        
-    cached = local_db.get_profile_analysis(username, client_id)
-    if cached:
-        return jsonify({"status": "CACHED", "result": json.loads(cached["analysis_data"])})
-        
+    if not apify_client.is_configured():
+        return jsonify({"error": "APIFY_TOKEN is not set in .env — add it, then restart the dashboard."}), 400
+
+    # A caller can force a re-scrape when a profile has changed since last time.
+    if not payload.get("refresh"):
+        cached = local_db.get_profile_analysis(username, client_id)
+        if cached:
+            return jsonify({"status": "CACHED", "result": json.loads(cached["analysis_data"])})
+
     run_input = {
-        "username": [username],
-        "resultsLimit": 5,
-        "skipPinnedPosts": False,
-        "skipTrialReels": False,
-        "includeSharesCount": False,
-        "includeTranscript": False,
-        "includeDownloadedVideo": False
+        "usernames": [username],
+        "resultsLimit": 12,
     }
-    
+
     try:
-        run = apify_client.start_run(INSTAGRAM_ACTOR, run_input)
+        run = apify_client.start_run(INSTAGRAM_PROFILE_ACTOR, run_input)
     except Exception as e:
         return jsonify({"error": str(e)}), 502
     return jsonify({"run_id": run["run_id"], "status": run["status"]})
@@ -945,25 +979,25 @@ def api_analyze_profile_status():
 
     try:
         items = apify_client.fetch_items(run["dataset_id"])
-        if not items:
-            return jsonify({"status": status, "error": "Profile not found or private."})
-            
+        profile_data = _profile_from_items(items)
+
         client = local_db.get_client(client_id)
         cfg = _load_client_cfg(client) if client else {}
-        
-        profile_data = items[0].copy()
-        profile_data["latestPosts"] = items
-        
+
         analysis = profile_analyzer.analyze_profile_data(profile_data, cfg)
-        
+
         local_db.save_profile_analysis(
-            username=username, 
-            profile_data=json.dumps(profile_data), 
-            analysis_data=json.dumps(analysis), 
+            username=username,
+            profile_data=json.dumps(profile_data),
+            analysis_data=json.dumps(analysis),
             client_id=client_id
         )
-        
+
         return jsonify({"status": status, "result": analysis})
+    except profile_analyzer.ProfileDataError as e:
+        # Not an internal failure -- the handle is genuinely unreadable. Report
+        # it as such instead of caching a meaningless score for it.
+        return jsonify({"status": status, "error": str(e)}), 200
     except Exception as e:
         import traceback; traceback.print_exc()
         return jsonify({"status": status, "error": f"Analysis failed: {str(e)}"}), 502
@@ -985,17 +1019,14 @@ def api_verify_creator():
     if not apify_client.is_configured():
         return jsonify({"error": "APIFY_TOKEN is not set in .env — add it, then restart the dashboard."}), 400
 
+    # Same actor as the analyzer: fraud checks need followersCount/followsCount,
+    # which the reel scraper does not return.
     run_input = {
-        "username": [username],
-        "resultsLimit": 6,
-        "skipPinnedPosts": False,
-        "skipTrialReels": False,
-        "includeSharesCount": False,
-        "includeTranscript": False,
-        "includeDownloadedVideo": False,
+        "usernames": [username],
+        "resultsLimit": 12,
     }
     try:
-        run = apify_client.start_run(INSTAGRAM_ACTOR, run_input)
+        run = apify_client.start_run(INSTAGRAM_PROFILE_ACTOR, run_input)
     except Exception as e:
         return jsonify({"error": str(e)}), 502
     return jsonify({"run_id": run["run_id"], "status": run["status"]})
@@ -1022,14 +1053,10 @@ def api_verify_creator_status():
 
     try:
         items = apify_client.fetch_items(run["dataset_id"])
-        if not items:
-            return jsonify({"status": status, "error": "Profile not found or private."})
+        profile_data = _profile_from_items(items)
 
         client = local_db.get_client(client_id)
         cfg = _load_client_cfg(client) if client else {}
-
-        profile_data = items[0].copy()
-        profile_data["latestPosts"] = items
 
         report = creator_verification.verify_creator(profile_data, cfg)
         # Point 50: fold in any stored reputation history for this creator.
@@ -1037,6 +1064,8 @@ def api_verify_creator_status():
             report, local_db.list_reputation(username)
         )
         return jsonify({"status": status, "result": report})
+    except profile_analyzer.ProfileDataError as e:
+        return jsonify({"status": status, "error": str(e)}), 200
     except Exception as e:
         import traceback; traceback.print_exc()
         return jsonify({"status": status, "error": f"Verification failed: {str(e)}"}), 502

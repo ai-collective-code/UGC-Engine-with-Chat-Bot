@@ -220,6 +220,24 @@ export function hasLanguageSignal(text: string): boolean {
   return (text.match(/\p{L}/gu) || []).length >= 12;
 }
 
+// ── Attachment-only messages ────────────────────────────────────────────────
+// Creators in this trade answer by SHOWING their work — a video of a tiling job,
+// photos of a finished bathroom, a voice note. Those messages carry no text, and
+// dropping them meant the bot sat silent on the strongest buying signal it gets.
+// We store a marker instead: it records THAT the creator replied, which is what
+// moves the flow forward, while carrying no words — so it must never be read as
+// language, and it can't be a yes/no or a phone number.
+export const ATTACHMENT_MARK = "[attachment]";
+
+export function attachmentPlaceholder(kinds: string[]): string {
+  const unique = [...new Set(kinds.filter(Boolean))];
+  return unique.length ? `${ATTACHMENT_MARK} ${unique.join(", ")}` : ATTACHMENT_MARK;
+}
+
+export function isAttachmentPlaceholder(text: string): boolean {
+  return text.trimStart().startsWith(ATTACHMENT_MARK);
+}
+
 // Common English function words. detectLanguage() returns "en" for any Latin
 // text with no regional hints, which includes romanized Bengali/Hindi we simply
 // have no keyword for ("amake details din") — so "en" alone is the ABSENCE of
@@ -250,6 +268,7 @@ function looksEnglish(text: string): boolean {
  * keyword for must NOT be mistaken for English.
  */
 export function signalLanguage(text: string): Lang | null {
+  if (isAttachmentPlaceholder(text)) return null; // a video says nothing about language
   if (!hasLanguageSignal(text)) return null;
   const detected = detectLanguage(text);
   if (detected !== "en") return detected; // positive regional evidence
@@ -313,8 +332,13 @@ export function languageSource(
   history: { role: "user" | "assistant"; content: string }[],
   opts: { committed: boolean }
 ): LanguageSource {
+  // An attachment we sent is not a written message — it can't be the opener that
+  // sets the language, so it must not count as "manual".
   const manual = history.find(
-    (m) => m.role === "assistant" && !identifyTemplate(m.content)
+    (m) =>
+      m.role === "assistant" &&
+      !identifyTemplate(m.content) &&
+      !isAttachmentPlaceholder(m.content)
   );
   if (manual) return { kind: "manual", text: manual.content };
 
@@ -328,7 +352,7 @@ export function languageSource(
   }
 
   const creator = history
-    .filter((m) => m.role === "user")
+    .filter((m) => m.role === "user" && !isAttachmentPlaceholder(m.content))
     .reduce<string | null>(
       (best, m) => (best === null || m.content.length > best.length ? m.content : best),
       null

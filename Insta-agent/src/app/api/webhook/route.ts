@@ -9,6 +9,7 @@ import {
   fetchFacebookProfile,
 } from "@/lib/instagram";
 import {
+  attachmentPlaceholder,
   creatorLanguageSwitch,
   decide,
   detectLanguage,
@@ -78,6 +79,9 @@ interface MessagingEvent {
     text?: string;
     mid?: string;
     is_echo?: boolean;
+    // Present when the message carried media instead of (or as well as) text: a
+    // video of a job, photos of finished work, a voice note, a shared reel.
+    attachments?: { type?: string }[];
     // Present when the creator TAPPED a quick-reply button. The payload
     // (FLOW_YES / FLOW_NO) tells us their intent regardless of the button
     // label's language — so Yes/No works in every language.
@@ -125,7 +129,24 @@ export async function POST(request: NextRequest) {
 
   const results: string[] = [];
   for (const messaging of events) {
-    if (!messaging.message?.text) {
+    if (!messaging.message) {
+      results.push("no_message");
+      continue;
+    }
+    // Creators in this trade reply by showing their work — a video of a tiling
+    // job, photos of a finished bathroom, a voice note. Those messages have no
+    // text, and skipping them left the bot silent on the strongest signal of
+    // interest it gets (two creators sat a week with no reply). Stand in a marker
+    // so the flow sees that they answered; it carries no words, so the language
+    // and yes/no logic ignore it by design.
+    const attachments = messaging.message.attachments ?? [];
+    const body =
+      messaging.message.text ??
+      (attachments.length
+        ? attachmentPlaceholder(attachments.map((a) => a.type ?? "file"))
+        : null);
+    if (body === null) {
+      // Reactions, read receipts, deletions and the like: nothing was said.
       results.push("non_text");
       continue;
     }
@@ -142,7 +163,7 @@ export async function POST(request: NextRequest) {
       await handleMessage(
         platform,
         igsid,
-        messaging.message.text,
+        body,
         messaging.message.mid,
         isEcho ? "assistant" : "user",
         messaging.message.quick_reply?.payload

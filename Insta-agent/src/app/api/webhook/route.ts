@@ -11,7 +11,9 @@ import {
 import {
   decide,
   detectLanguage,
+  hasLanguageSignal,
   isHardcodedLang,
+  languageSource,
   yesNoLabels,
   QR_YES_PAYLOAD,
   QR_NO_PAYLOAD,
@@ -305,28 +307,62 @@ async function handleMessage(
       }
     }
 
-    // Resolve the conversation's language ONCE (cached on the row). Prefer the
-    // opener; the fast hardcoded detector handles en/hi/bn/mr, and only when it
-    // can't tell do we spend one AI call to name the real language (Telugu,
-    // Tamil, …). Everything downstream then speaks that language.
+    // ── Conversation language ───────────────────────────────────────────────
+    // The language of the first HUMAN-WRITTEN message governs the whole
+    // conversation. A manually-sent opener — or an operator stepping in from the
+    // dashboard — is a person deliberately choosing a language, so it outranks
+    // anything the bot inferred earlier: previously a creator's bare "hi" pinned
+    // the thread to English, and the bot kept answering in English even after a
+    // human had written to them in Bengali.
+    //
+    // With no human message to go on we read the creator's own words, and
+    // deliberately DON'T commit until they've written enough to actually tell
+    // (hasLanguageSignal). While uncommitted we still have to answer, so this
+    // turn goes out in the campaign's default language without locking the
+    // conversation to it — the creator's next message can still decide.
     let lang = conversation.language ?? null;
-    if (!lang) {
-      const sample =
-        flowHistory.find((m) => m.role === "assistant")?.content ??
-        flowHistory.find((m) => m.role === "user")?.content ??
-        text;
-      const quick = detectLanguage(sample);
-      if (quick !== "en") {
-        lang = quick;
-      } else {
-        const aiName = await detectLanguageName(sample);
-        lang = aiName ? normalizeLang(aiName) : "en";
+    const source = languageSource(flowHistory, { committed: lang !== null });
+
+    if (source.kind === "manual" || !lang) {
+      let resolved: string | null = null;
+
+      if (source.kind === "template") {
+        resolved = source.lang;
+      } else if (source.kind === "manual" || source.kind === "creator") {
+        const quick = detectLanguage(source.text);
+        if (quick !== "en") {
+          // The hardcoded detector is confident and free, so a human writing in
+          // hi/bn/mr re-asserts their choice on every turn at no cost.
+          resolved = quick;
+        } else if (!lang && hasLanguageSignal(source.text)) {
+          // Could be a language we hold no templates for (Telugu, Tamil, …).
+          // This costs an AI call, so only spend it when nothing is stored yet.
+          const aiName = await detectLanguageName(source.text);
+          resolved = aiName ? normalizeLang(aiName) : "en";
+        }
+        // Otherwise: too little to go on. Leave it unresolved and re-check next
+        // turn rather than committing the conversation to a guess.
       }
-      await queryOne(`UPDATE instagram_conversations SET language = $1 WHERE id = $2`, [
-        lang,
-        conversation.id,
-      ]);
+
+      if (resolved && resolved !== lang) {
+        lang = resolved;
+        await queryOne(`UPDATE instagram_conversations SET language = $1 WHERE id = $2`, [
+          lang,
+          conversation.id,
+        ]);
+      }
     }
+
+    // Language to answer in right now. When the language is still unresolved this
+    // applies to THIS TURN ONLY — `lang` stays null, so the conversation remains
+    // open to whatever the creator writes next.
+    //
+    // English is the holding choice because someone who opens with a Latin-script
+    // "hi" reads it, whereas guessing a specific regional language can land
+    // wrong. Change this one constant to FALLBACK_LANG (Hindi) if the campaign
+    // would rather lead in its default language.
+    const UNRESOLVED_REPLY_LANG = "en";
+    const replyLang = lang ?? UNRESOLVED_REPLY_LANG;
 
     // A tapped quick-reply carries its intent in the payload, so classification
     // is language-proof: normalize the creator's last message to a canonical
@@ -341,7 +377,7 @@ async function handleMessage(
       }
     }
 
-    const decision = decide(flowHistory, lang ?? undefined);
+    const decision = decide(flowHistory, replyLang);
 
     if (decision.capturedPhone) {
       // The number is also the creator's last message in the transcript; log it
@@ -358,11 +394,11 @@ async function handleMessage(
       // canonical text so the creator still gets a reply.
       let sendText = decision.send;
       let quickReplies = decision.quickReplies;
-      if (lang && !isHardcodedLang(lang)) {
-        const translated = await translateTo(decision.send, lang);
+      if (!isHardcodedLang(replyLang)) {
+        const translated = await translateTo(decision.send, replyLang);
         if (translated) sendText = translated;
         if (quickReplies) {
-          const labels = yesNoLabels(lang);
+          const labels = yesNoLabels(replyLang);
           quickReplies = quickReplies.map((q) =>
             q.payload === QR_YES_PAYLOAD
               ? { ...q, title: labels.yes }

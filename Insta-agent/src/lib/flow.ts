@@ -207,6 +207,73 @@ export function conversationLanguage(
   return firstUser ? detectLanguage(firstUser.content) : FALLBACK_LANG;
 }
 
+/**
+ * Is there enough text here to judge a language from?
+ *
+ * A creator's opening "hi" is two letters — it tells us nothing, and committing
+ * the conversation to English on the strength of it is what stranded
+ * Bengali-speaking creators in English replies. This gates the (paid) AI
+ * language-naming call so we only spend it on text that could actually carry a
+ * signal, and lets the caller defer committing until the creator says more.
+ */
+export function hasLanguageSignal(text: string): boolean {
+  return (text.match(/\p{L}/gu) || []).length >= 12;
+}
+
+/**
+ * Which message the conversation's language should be read from.
+ *
+ * Ordered by authority, strongest first:
+ *  - `manual`   — a human-written message (an assistant message that isn't one
+ *                 of our scripted templates: the manually-sent opener, or an
+ *                 operator replying from the dashboard). A person choosing a
+ *                 language is the strongest signal there is, so it outranks
+ *                 anything the bot previously guessed.
+ *  - `template` — a scripted message we already sent, but ONLY once the
+ *                 conversation has actually committed to a language
+ *                 (`committed`). A template sent while the language was still
+ *                 unresolved went out on a provisional guess, so treating it as
+ *                 authoritative would let the bot's own fallback reply lock the
+ *                 thread — exactly the trap this is meant to avoid. Once
+ *                 committed, it does lock: switching mid-flow would read as the
+ *                 bot changing its mind.
+ *  - `creator`  — the creator's own words, taking their LONGEST message so far
+ *                 rather than their first, since "hi" carries no signal but the
+ *                 sentence after it usually does.
+ */
+export type LanguageSource =
+  | { kind: "manual"; text: string }
+  | { kind: "template"; lang: Lang }
+  | { kind: "creator"; text: string }
+  | { kind: "none" };
+
+export function languageSource(
+  history: { role: "user" | "assistant"; content: string }[],
+  opts: { committed: boolean }
+): LanguageSource {
+  const manual = history.find(
+    (m) => m.role === "assistant" && !identifyTemplate(m.content)
+  );
+  if (manual) return { kind: "manual", text: manual.content };
+
+  if (opts.committed) {
+    for (const m of history) {
+      if (m.role === "assistant") {
+        const t = identifyTemplate(m.content);
+        if (t) return { kind: "template", lang: t.lang };
+      }
+    }
+  }
+
+  const creator = history
+    .filter((m) => m.role === "user")
+    .reduce<string | null>(
+      (best, m) => (best === null || m.content.length > best.length ? m.content : best),
+      null
+    );
+  return creator === null ? { kind: "none" } : { kind: "creator", text: creator };
+}
+
 // ── Yes / No classification (deterministic keyword lists) ────────────────────
 const YES_TOKENS = new Set([
   // English
@@ -335,8 +402,16 @@ export function decide(
   history: { role: "user" | "assistant"; content: string }[],
   forcedLang?: string
 ): FlowDecision {
-  const assistantMsgs = history.filter((m) => m.role === "assistant");
-  if (assistantMsgs.length >= MAX_BOT_MESSAGES) {
+  // Count only messages the BOT sent, i.e. recognized templates. Counting every
+  // assistant row made human messages spend the bot's budget: an operator's
+  // manually-sent opener plus one follow-up hit the cap of 4 (each dashboard send
+  // lands twice — the dashboard inserts a row and Meta echoes the same message
+  // back), so the bot went silent on the creator's very first "yes". The cap
+  // exists to stop the bot from looping, not to penalise humans for talking.
+  const botMsgs = history.filter(
+    (m) => m.role === "assistant" && identifyTemplate(m.content) !== null
+  );
+  if (botMsgs.length >= MAX_BOT_MESSAGES) {
     return { send: null, lock: true, reason: "max_bot_messages_reached" };
   }
 

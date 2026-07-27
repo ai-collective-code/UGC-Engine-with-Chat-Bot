@@ -108,8 +108,25 @@ signature check accepts `INSTAGRAM_APP_SECRET || FACEBOOK_APP_SECRET` (one Meta 
 - Realtime dashboard via Ably.
 - AI Profile Analyzer + Creator Verification: working, and fixed 2026-07-25 —
   they had been scoring every creator from a failed scrape (see gotchas below).
+- Conversation language: the first human-written message governs the thread; a
+  creator can take it over by writing twice in another language. Pinned by
+  `Insta-agent/tests/` — run `npm test` (Node's built-in runner, no deps).
+- Media-only replies (a video of a job, photos, a voice note) are answered.
+  They used to be dropped silently, which is the worst thing to ignore in this
+  trade — creators answer by SHOWING the work.
 
 **Pending**
+- Creator-facing copy defect: `lib/message_templates.py` splices `{offer}` in
+  with no sentence around it, so the Hindi opener reads "...videos chahiye.
+  2000 Amazon Voucher Agar interested hain to reply kar dein." Each language
+  template should frame the offer itself (offer_line is meant to stay a short
+  noun phrase). Untouched so far because it is creator-facing copy in 7
+  languages and the file warns Odia/Assamese/Bengali are best-effort.
+- `ugc-engine/config/xyz_tiles.json` is orphaned (no client uses that key) but
+  still holds the wrong brand and a wrong offer. Delete it, or it will bite
+  whoever re-keys a client to it.
+- `default_language` disagrees across sources: the DB row says English, the
+  config file and `message_templates.DEFAULT_LANGUAGE` both say Hindi.
 - **Meta App Review for `pages_messaging` — SUBMITTED (2026-07-23), status "Review
   in progress," typically decided within ~20 days.** Once approved (Advanced
   Access), any creator can message the Page and get bot replies, not just app
@@ -150,6 +167,28 @@ signature check accepts `INSTAGRAM_APP_SECRET || FACEBOOK_APP_SECRET` (one Meta 
   ("XYZ Tiles", empty deliverables) while the DB said MYK LATICRETE; repointed
   to `myk_laticrete` on 2026-07-25. `offer_line.value` is injected verbatim into
   creator-facing outreach messages — never leave a placeholder there.
+- **A message with no text is still a reply.** The webhook used to drop anything
+  without `message.text`, so a creator answering with a video/photo/voice note
+  got silence — and no conversation row was even created, so they were invisible
+  in the dashboard too (@gurpreet_thekedaar sat a week that way). Media-only
+  messages now store an `[attachment] <kind>` marker so the flow sees the reply.
+  That marker must never be read as content: "[attachment] video" looks like
+  English to a keyword detector, so it is excluded from language detection, from
+  being treated as the manual opener, and from the two-message language switch.
+- **You cannot reply to an old DM through the API.** Instagram allows a send only
+  within 24h of the creator's last message (7 days with a `HUMAN_AGENT` tag,
+  which our send does not set). Past that the API rejects it and a human must
+  reply from the Instagram app. Check the window before promising a send.
+- **`MAX_BOT_MESSAGES` counts bot templates, not assistant rows** — and must stay
+  that way. It previously counted every assistant row, so human messages spent
+  the bot's budget; since a dashboard send lands twice (the dashboard inserts a
+  row AND Meta echoes the same message back), an operator's opener plus one
+  follow-up hit the cap of 4 and the bot went silent on the creator's first "yes".
+- **A wrong brand name in a live DM probably came from a human, not the code.**
+  "XYZ laticreate" reached a real creator; there is no "XYZ" anywhere in the
+  source. It was hand-typed (typos included), copied from the dashboard while the
+  stale `xyz_tiles.json` config was still in effect. Fix the config first, then
+  the habit — grep the code before assuming a template is at fault.
 - **Gemini free tier is metered per model per day.** `lib/gemini_helper.py`
   walks a model chain and now bounds each attempt with `GEMINI_TIMEOUT_SECONDS`
   (default 20) and remembers the last model that answered — without the timeout
@@ -163,7 +202,14 @@ signature check accepts `INSTAGRAM_APP_SECRET || FACEBOOK_APP_SECRET` (one Meta 
 ## 6. How to work in this repo
 
 - Two dev servers: Flask engine on `:8000`, Next.js chatbot on `:3000`.
-- Typecheck the chatbot with `npx tsc --noEmit` before pushing.
+- Typecheck the chatbot with `npx tsc --noEmit` before pushing, and run
+  `npm test` in `Insta-agent/` — it pins the conversation-language and
+  attachment-handling contract (Node's built-in runner, zero dependencies; the
+  tests are `.mts` so Node treats them as ESM without touching package.json).
+  Both of those areas have produced bugs that threw no error and simply behaved
+  wrongly, so a green suite is the cheap check before shipping flow changes.
+- On Windows, `next build` can fail with `EBUSY` on `.next/` while OneDrive is
+  syncing it. Delete `.next` and rebuild; it is not a code error.
 - DB migrations are applied directly against the Render Postgres (no migration
   framework); do them in a transaction and reflect any schema change in code
   (e.g. `ON CONFLICT` targets must match the actual unique constraint).

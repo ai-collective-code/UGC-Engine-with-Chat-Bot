@@ -220,6 +220,68 @@ export function hasLanguageSignal(text: string): boolean {
   return (text.match(/\p{L}/gu) || []).length >= 12;
 }
 
+// Common English function words. detectLanguage() returns "en" for any Latin
+// text with no regional hints, which includes romanized Bengali/Hindi we simply
+// have no keyword for ("amake details din") — so "en" alone is the ABSENCE of
+// evidence, not evidence of English. Before we let a creator's message count as
+// them switching to English we want positive proof, and function words are the
+// strongest available: they're near-unavoidable in real English and rare in
+// romanized regional text.
+const ENGLISH_MARKERS = new Set([
+  "the", "and", "is", "are", "was", "you", "your", "my", "me", "we", "our",
+  "for", "with", "from", "this", "that", "these", "those", "what", "when",
+  "where", "how", "why", "can", "could", "will", "would", "should", "please",
+  "have", "has", "had", "do", "does", "did", "not", "but", "about", "more",
+  "need", "want", "send", "tell", "know", "there", "then", "than", "some",
+  "any", "much", "many", "give", "take", "make", "let", "get",
+]);
+
+function looksEnglish(text: string): boolean {
+  const tokens = new Set(norm(text).split(/[^a-z']+/).filter(Boolean));
+  let hits = 0;
+  for (const t of tokens) if (ENGLISH_MARKERS.has(t)) hits++;
+  return hits >= 2;
+}
+
+/**
+ * The language a single message is genuine evidence for, or null when it isn't
+ * evidence of anything. Used for creator messages, where a wrong call actively
+ * costs us: "yes ok" is too short to read, and romanized Bengali we hold no
+ * keyword for must NOT be mistaken for English.
+ */
+export function signalLanguage(text: string): Lang | null {
+  if (!hasLanguageSignal(text)) return null;
+  const detected = detectLanguage(text);
+  if (detected !== "en") return detected; // positive regional evidence
+  return looksEnglish(text) ? "en" : null; // needs positive English evidence
+}
+
+/**
+ * Has the creator switched away from the language we're speaking?
+ *
+ * The manual opener sets the language, and a lone off-language reply must not
+ * unseat it — creators type "ok", "yes", "thanks" in English constantly while
+ * conversing in Bengali. But two messages of real, substantive text in the same
+ * other language is a genuine preference, so the creator gets the final say.
+ *
+ * Counts only messages that are actual evidence (see signalLanguage), so short
+ * affirmations interleaved between them neither count nor break the streak.
+ * Returns the language to switch to, or null to stay put.
+ */
+export function creatorLanguageSwitch(
+  history: { role: "user" | "assistant"; content: string }[],
+  currentLang: string
+): Lang | null {
+  const signals = history
+    .filter((m) => m.role === "user")
+    .map((m) => signalLanguage(m.content))
+    .filter((l): l is Lang => l !== null);
+
+  if (signals.length < 2) return null;
+  const [prev, last] = signals.slice(-2);
+  return last === prev && last !== currentLang ? last : null;
+}
+
 /**
  * Which message the conversation's language should be read from.
  *

@@ -9,6 +9,10 @@
     "esModuleInterop": true,
     "module": "esnext",
     "moduleResolution": "bundler",
+    // Lets tests/ import "./flow.ts" with the extension Node's resolver needs,
+    // so one file satisfies both tsc and `node --test`. Safe: noEmit is on, so
+    // this never reaches a build artifact.
+    "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
     "jsx": "react-jsx",

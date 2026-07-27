@@ -9,6 +9,7 @@ import {
   fetchFacebookProfile,
 } from "@/lib/instagram";
 import {
+  creatorLanguageSwitch,
   decide,
   detectLanguage,
   hasLanguageSignal,
@@ -346,6 +347,24 @@ async function handleMessage(
 
       if (resolved && resolved !== lang) {
         lang = resolved;
+        await queryOne(`UPDATE instagram_conversations SET language = $1 WHERE id = $2`, [
+          lang,
+          conversation.id,
+        ]);
+      }
+    }
+
+    // The creator gets the final say, but only on real evidence. A single
+    // off-language reply must not unseat the manual opener — creators type "ok",
+    // "yes", "thanks" in English constantly while conversing in Bengali. Two
+    // substantive messages in the same other language is a genuine preference,
+    // so we follow them there. Re-evaluated every turn from the transcript, so
+    // it stays switched while that remains true and follows them back if they
+    // return to the opener's language.
+    if (lang) {
+      const switched = creatorLanguageSwitch(flowHistory, lang);
+      if (switched) {
+        lang = switched;
         await queryOne(`UPDATE instagram_conversations SET language = $1 WHERE id = $2`, [
           lang,
           conversation.id,

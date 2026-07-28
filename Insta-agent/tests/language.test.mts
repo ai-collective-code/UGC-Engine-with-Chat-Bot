@@ -62,7 +62,7 @@ function resolveLanguage(history: Msg[], stored: string | null = null): string {
   return lang ?? "unresolved";
 }
 
-test("the first human-written message sets the language", () => {
+test("the human-written message sets the language", () => {
   assert.equal(resolveLanguage([A(BN_OPENER)]), "bn");
   assert.equal(resolveLanguage([A(HI_OPENER)]), "hi");
   assert.equal(resolveLanguage([A(EN_OPENER)]), "en");
@@ -71,6 +71,33 @@ test("the first human-written message sets the language", () => {
     "bn",
     "native script must be detected too"
   );
+});
+
+test("a re-opened thread follows the newest opener, not a stale one", () => {
+  // Seen in production on @imdebojyotiii: an English opener one day, a Bengali
+  // opener into the same thread the next. Honouring the FIRST human message left
+  // the bot answering the Bengali pitch in English.
+  const history = [
+    A(EN_OPENER),
+    U("Hiii"),
+    A(template("OFFER", "en")),
+    U("Yes"),
+    A(template("WHATSAPP_ASK", "en")),
+    A(BN_OPENER), // operator re-opens in Bengali the next day
+    U("Intarested"),
+  ];
+  assert.equal(
+    resolveLanguage(history, "en"),
+    "bn",
+    "the operator's newest choice must win over yesterday's"
+  );
+});
+
+test("an operator's 'ok' does not flip the thread's language", () => {
+  // The newest-wins rule must not be hijacked by a throwaway line: "ok" carries
+  // no language signal, so the Bengali opener still governs.
+  assert.equal(resolveLanguage([A(BN_OPENER), U("Intarested"), A("ok")], "bn"), "bn");
+  assert.equal(resolveLanguage([A(BN_OPENER), A("ok done")], null), "bn");
 });
 
 test("the opener's language survives a creator replying in English", () => {

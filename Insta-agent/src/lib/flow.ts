@@ -334,12 +334,22 @@ export function languageSource(
 ): LanguageSource {
   // An attachment we sent is not a written message — it can't be the opener that
   // sets the language, so it must not count as "manual".
-  const manual = history.find(
+  const manuals = history.filter(
     (m) =>
       m.role === "assistant" &&
       !identifyTemplate(m.content) &&
       !isAttachmentPlaceholder(m.content)
   );
+
+  // The LATEST human message wins, not the first. A thread gets re-opened: an
+  // operator sends an English opener one day and a Bengali one the next, and
+  // honouring the first left the bot answering the Bengali pitch in English.
+  // Whatever a person wrote most recently is their current intent.
+  //
+  // Only messages carrying real language signal are eligible, so an operator
+  // typing "ok" into a Bengali thread doesn't flip it to English — the same
+  // reason a creator's "ok" doesn't (see signalLanguage).
+  const manual = [...manuals].reverse().find((m) => signalLanguage(m.content) !== null);
   if (manual) return { kind: "manual", text: manual.content };
 
   if (opts.committed) {

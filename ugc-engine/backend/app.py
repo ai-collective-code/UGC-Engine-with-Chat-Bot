@@ -773,7 +773,7 @@ def api_scrape_start():
         # Page URLs/handles only. A free-text search term would be pasted onto
         # facebook.com/ and scraped as a dead URL -- Apify credits spent for a
         # guaranteed 0 results -- so reject it and point at /api/scrape/facebook-search.
-        keyword_like = [t for t in targets if "facebook.com" not in t.lower() and " " in t]
+        keyword_like = [t for t in targets if " " in t]
         if keyword_like:
             return jsonify({"error": (
                 f'"{keyword_like[0]}" looks like a search term, not a page URL. This endpoint takes '
@@ -782,7 +782,7 @@ def api_scrape_start():
             )}), 400
         actor_to_run = FACEBOOK_ACTOR
         run_input = {
-            "startUrls": [{"url": t if t.startswith("http") else f"https://www.facebook.com/{t}"} for t in targets],
+            "startUrls": [{"url": t if t.startswith("http") else (f"https://{t}" if "facebook.com" in t.lower() else f"https://www.facebook.com/{t}")} for t in targets],
             "resultsLimit": results_limit,
         }
     else:
@@ -1506,6 +1506,16 @@ def api_list_conversations():
         client_id=active_client_id,
         channel=channel,
     )
+    # Detect WhatsApp numbers in local conversations by scanning message history
+    for c in convos:
+        history = local_db.get_history(
+            c.get("client_id"),
+            c.get("channel"),
+            c.get("contact_id")
+        )
+        num = phone_capture.capture_from_history(history)
+        if num:
+            c["detected_whatsapp"] = num
     # Merge in Instagram DMs from the chatbot's Supabase (read-only bridge).
     # They're client-agnostic, so they always appear regardless of the client
     # filter; only the channel filter can hide them. Sorted newest-first with
@@ -1524,6 +1534,14 @@ def api_list_conversations():
                     c["whatsapp_captured"] = True
         convos = convos + ig
         convos.sort(key=lambda c: c.get("last_message_at") or "", reverse=True)
+    # Auto-route detected numbers from local conversations too
+    capture_client_id = _default_capture_client_id(active_client_id)
+    for c in convos:
+        if c.get("channel") != supabase_bridge.CHANNEL and capture_client_id:
+            num = c.get("detected_whatsapp")
+            if num:
+                if _route_number_to_whatsapp(capture_client_id, c.get("contact_id"), num):
+                    c["whatsapp_captured"] = True
     # Flag operator-hidden conversations (view-only) rather than dropping them,
     # so the frontend can show a "N hidden / Show all" control. No deletion.
     hidden = _get_hidden_conversations()

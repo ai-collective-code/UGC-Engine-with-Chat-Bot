@@ -35,6 +35,9 @@
         <button class="nav-item" data-section="scrape" id="nav-scrape">
           <span class="nav-icon">📸</span> Instagram Scraper
         </button>
+        <button class="nav-item" data-section="ytscrape" id="nav-ytscrape">
+          <span class="nav-icon">▶️</span> YouTube Scraper
+        </button>
         <button class="nav-item" data-section="analyzer" id="nav-analyzer">
           <span class="nav-icon">🔍</span> Profile Analyzer
         </button>
@@ -222,6 +225,20 @@
           <div class="scrape-status" id="hashtag-status"></div>
         </div>
 
+        <div class="panel">
+          <div class="panel-head" style="margin-bottom:12px; display:flex; align-items:center; justify-content:space-between; gap:12px;">
+            <div>
+              <h2>Instagram results so far</h2>
+              <span class="panel-hint">Creators scraped for the selected client — jump to the Creators or WhatsApp tab to work them</span>
+            </div>
+            <button class="btn btn-small" id="scrape-export-btn">⬇ Export to Excel</button>
+          </div>
+          <div class="scrape-stats" id="scrape-stats"></div>
+        </div>
+      </section>
+
+      <!-- ═══ YOUTUBE SCRAPER ═══ -->
+      <section id="section-ytscrape" class="section" hidden>
         <div class="panel scrape-panel">
           <div class="upload-intro-row">
             <div class="panel-head" style="margin:0">
@@ -264,6 +281,12 @@
               <label class="scrape-limit-label">Max channels
                 <input type="number" id="yt-search-limit" value="10" min="1" max="50">
               </label>
+              <label class="scrape-limit-label">Region
+                <input type="text" id="yt-search-region" value="" placeholder="e.g. IN" style="width: 60px">
+              </label>
+              <label class="scrape-limit-label">Lang
+                <input type="text" id="yt-search-lang" value="" placeholder="e.g. hi" style="width: 60px">
+              </label>
               <label class="scrape-limit-label" style="flex-direction:row; align-items:center; gap:6px;">
                 <input type="checkbox" id="yt-search-import">
                 Save as creators
@@ -278,12 +301,12 @@
         <div class="panel">
           <div class="panel-head" style="margin-bottom:12px; display:flex; align-items:center; justify-content:space-between; gap:12px;">
             <div>
-              <h2>Instagram results so far</h2>
-              <span class="panel-hint">Creators scraped for the selected client — jump to the Creators or WhatsApp tab to work them</span>
+              <h2>YouTube results so far</h2>
+              <span class="panel-hint">Channels scraped for the selected client — jump to the Creators or WhatsApp tab to work them</span>
             </div>
-            <button class="btn btn-small" id="scrape-export-btn">⬇ Export to Excel</button>
+            <button class="btn btn-small" id="yt-export-btn">⬇ Export to Excel</button>
           </div>
-          <div class="scrape-stats" id="scrape-stats"></div>
+          <div class="scrape-stats" id="yt-stats"></div>
         </div>
       </section>
 

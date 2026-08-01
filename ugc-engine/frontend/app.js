@@ -186,7 +186,7 @@ function switchSection(section) {
     el.hidden = el.id !== `section-${section}`;
   });
   const titles = {
-    overview: "Overview", upload: "Upload Data", scrape: "Instagram Scraper", analyzer: "Profile Analyzer",
+    overview: "Overview", upload: "Upload Data", scrape: "Instagram Scraper", ytscrape: "YouTube Scraper", analyzer: "Profile Analyzer",
     verify: "Creator Verification", langlab: "Language Lab", translator: "Translator",
     whatsapp: "WhatsApp Contacts", creators: "Creators", conversations: "Conversations",
     spinner: "Message Variations",
@@ -200,6 +200,7 @@ function loadSection(section) {
   if (section === "overview") return loadOverview();
   if (section === "upload") return loadUpload();
   if (section === "scrape") return loadScrape();
+  if (section === "ytscrape") return loadYtScrape();
   if (section === "analyzer") return loadAnalyzer();
   if (section === "verify") return loadVerify();
   if (section === "langlab") return loadLangLab();
@@ -1318,7 +1319,7 @@ async function fetchYtChannels() {
     } else {
       setYtStatus("yt-status", "");
       renderYtChannels("yt-results", res);
-      if (res.imported) renderScrapeStats();
+      if (res.imported) renderYtStats();
     }
   } catch (err) {
     setYtStatus("yt-status", err.message, "error");
@@ -1344,6 +1345,8 @@ async function searchYtChannels() {
         client_id: clientId,
         query,
         limit: Number(document.getElementById("yt-search-limit").value) || 10,
+        region_code: document.getElementById("yt-search-region")?.value || undefined,
+        relevance_language: document.getElementById("yt-search-lang")?.value || undefined,
         import: document.getElementById("yt-search-import").checked,
       }),
     });
@@ -1353,7 +1356,7 @@ async function searchYtChannels() {
     } else {
       setYtStatus("yt-search-status", res.channels?.length ? "" : "No channels matched that search.");
       renderYtChannels("yt-search-results", res);
-      if (res.imported) renderScrapeStats();
+      if (res.imported) renderYtStats();
     }
   } catch (err) {
     setYtStatus("yt-search-status", err.message, "error");
@@ -1365,11 +1368,20 @@ async function searchYtChannels() {
 function initScrape() {
   document.getElementById("scrape-btn").addEventListener("click", startScrape);
   document.getElementById("hashtag-btn").addEventListener("click", startHashtagScrape);
-  document.getElementById("yt-btn").addEventListener("click", fetchYtChannels);
-  document.getElementById("yt-search-btn").addEventListener("click", searchYtChannels);
   document.getElementById("scrape-export-btn").addEventListener("click", () => {
     const params = new URLSearchParams({ source_platform: "instagram" });
     const clientId = document.getElementById("scrape-client-select").value || state.clientId;
+    if (clientId) params.set("client_id", clientId);
+    window.open(`/api/creators/export?${params.toString()}`, "_blank");
+  });
+}
+
+function initYtScrape() {
+  document.getElementById("yt-btn").addEventListener("click", fetchYtChannels);
+  document.getElementById("yt-search-btn").addEventListener("click", searchYtChannels);
+  document.getElementById("yt-export-btn").addEventListener("click", () => {
+    const params = new URLSearchParams({ source_platform: "youtube" });
+    const clientId = document.getElementById("yt-client-select").value || state.clientId;
     if (clientId) params.set("client_id", clientId);
     window.open(`/api/creators/export?${params.toString()}`, "_blank");
   });
@@ -1388,8 +1400,7 @@ async function loadScrape() {
   const options = clients.length
     ? clients.map((c) => `<option value="${c.id}">${escapeHtml(c.brand_display_name || c.client_name)}</option>`).join("")
     : '<option value="">No clients yet — add one in the Clients tab first</option>';
-  for (const id of ["scrape-client-select", "hashtag-client-select",
-                    "yt-client-select", "yt-search-client-select"]) {
+  for (const id of ["scrape-client-select", "hashtag-client-select"]) {
     const sel = document.getElementById(id);
     if (!sel) continue;
     const current = sel.value;
@@ -1399,6 +1410,21 @@ async function loadScrape() {
   renderScrapeStats();
 }
 
+async function loadYtScrape() {
+  const clients = await api("/api/clients").catch(() => []);
+  const options = clients.length
+    ? clients.map((c) => `<option value="${c.id}">${escapeHtml(c.brand_display_name || c.client_name)}</option>`).join("")
+    : '<option value="">No clients yet — add one in the Clients tab first</option>';
+  for (const id of ["yt-client-select", "yt-search-client-select"]) {
+    const sel = document.getElementById(id);
+    if (!sel) continue;
+    const current = sel.value;
+    sel.innerHTML = options;
+    if (current) sel.value = current;
+  }
+  renderYtStats();
+}
+
 async function renderScrapeStats() {
   const qs = state.clientId ? `?client_id=${state.clientId}` : "";
   const breakdown = await api(`/api/platform-breakdown${qs}`).catch(() => ({}));
@@ -1406,6 +1432,16 @@ async function renderScrapeStats() {
   document.getElementById("scrape-stats").innerHTML = `
     <div class="pipeline-row"><span class="pipeline-icon">📸</span><span class="pipeline-label">Instagram creators scraped</span><span class="pipeline-count">${ig.total}</span></div>
     <div class="pipeline-row"><span class="pipeline-icon">🟢</span><span class="pipeline-label">→ Routed to WhatsApp</span><span class="pipeline-count">${ig.whatsapp_ready}</span></div>
+  `;
+}
+
+async function renderYtStats() {
+  const qs = state.clientId ? `?client_id=${state.clientId}` : "";
+  const breakdown = await api(`/api/platform-breakdown${qs}`).catch(() => ({}));
+  const yt = breakdown.youtube || { total: 0, whatsapp_ready: 0 };
+  document.getElementById("yt-stats").innerHTML = `
+    <div class="pipeline-row"><span class="pipeline-icon">▶️</span><span class="pipeline-label">YouTube channels scraped</span><span class="pipeline-count">${yt.total}</span></div>
+    <div class="pipeline-row"><span class="pipeline-icon">🟢</span><span class="pipeline-label">→ Routed to WhatsApp</span><span class="pipeline-count">${yt.whatsapp_ready}</span></div>
   `;
 }
 
@@ -2712,6 +2748,7 @@ async function init() {
   initShopsForm();
   initShopsCityForm();
   initScrape();
+  initYtScrape();
   initAnalyzer();
   initVerify();
   initDealers();

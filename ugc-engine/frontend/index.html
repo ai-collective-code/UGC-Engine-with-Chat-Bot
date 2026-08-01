@@ -35,6 +35,9 @@
         <button class="nav-item" data-section="scrape" id="nav-scrape">
           <span class="nav-icon">📸</span> Instagram Scraper
         </button>
+        <button class="nav-item" data-section="fbscrape" id="nav-fbscrape">
+          <span class="nav-icon">📘</span> Facebook Scraper
+        </button>
         <button class="nav-item" data-section="ytscrape" id="nav-ytscrape">
           <span class="nav-icon">▶️</span> YouTube Scraper
         </button>
@@ -237,6 +240,42 @@
             <button class="btn btn-small" id="scrape-export-btn">⬇ Export to Excel</button>
           </div>
           <div class="scrape-stats" id="scrape-stats"></div>
+        </div>
+      </section>
+
+      <!-- ═══ FACEBOOK SCRAPER ═══ -->
+      <section id="section-fbscrape" class="section" hidden>
+        <div class="panel scrape-panel">
+          <div class="upload-intro-row">
+            <div class="panel-head" style="margin:0">
+              <h2>📘 Facebook Scraper <span class="scrape-live-tag">live · Apify</span></h2>
+              <span class="panel-hint">Pull Facebook pages straight into the platform. Enter Facebook page URLs (one per line). Any phone number found is routed to WhatsApp automatically. Uses your Apify credits.</span>
+            </div>
+            <label class="upload-client-label">
+              Client
+              <select id="fb-scrape-client-select" required></select>
+            </label>
+          </div>
+          <div class="scrape-row">
+            <textarea id="fb-scrape-targets" class="scrape-targets" rows="4" placeholder="https://www.facebook.com/zuck&#10;https://www.facebook.com/anotherpage"></textarea>
+            <div class="scrape-controls">
+              <label class="scrape-limit-label">Max results / page
+                <input type="number" id="fb-scrape-limit" value="10" min="1" max="200">
+              </label>
+              <button class="btn btn-primary" id="fb-scrape-btn">▶ Scrape now</button>
+            </div>
+          </div>
+          <div class="scrape-status" id="fb-scrape-status"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-head" style="margin-bottom:12px; display:flex; align-items:center; justify-content:space-between; gap:12px;">
+            <div>
+              <h2>Facebook results so far</h2>
+              <span class="panel-hint">Creators scraped for the selected client — jump to the Creators or WhatsApp tab to work them</span>
+            </div>
+            <button class="btn btn-small" id="fb-scrape-export-btn">⬇ Export to Excel</button>
+          </div>
+          <div class="scrape-stats" id="fb-scrape-stats"></div>
         </div>
       </section>
 

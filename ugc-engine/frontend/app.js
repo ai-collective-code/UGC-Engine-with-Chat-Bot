@@ -186,7 +186,7 @@ function switchSection(section) {
     el.hidden = el.id !== `section-${section}`;
   });
   const titles = {
-    overview: "Overview", upload: "Upload Data", scrape: "Instagram Scraper", ytscrape: "YouTube Scraper", analyzer: "Profile Analyzer",
+    overview: "Overview", upload: "Upload Data", scrape: "Instagram Scraper", fbscrape: "Facebook Scraper", ytscrape: "YouTube Scraper", analyzer: "Profile Analyzer",
     verify: "Creator Verification", langlab: "Language Lab", translator: "Translator",
     whatsapp: "WhatsApp Contacts", creators: "Creators", conversations: "Conversations",
     spinner: "Message Variations",
@@ -201,6 +201,7 @@ function loadSection(section) {
   if (section === "overview") return loadOverview();
   if (section === "upload") return loadUpload();
   if (section === "scrape") return loadScrape();
+  if (section === "fbscrape") return loadFbScrape();
   if (section === "ytscrape") return loadYtScrape();
   if (section === "analyzer") return loadAnalyzer();
   if (section === "verify") return loadVerify();
@@ -1376,6 +1377,15 @@ function initScrape() {
     if (clientId) params.set("client_id", clientId);
     window.open(`/api/creators/export?${params.toString()}`, "_blank");
   });
+
+  // Facebook scraper bindings
+  document.getElementById("fb-scrape-btn")?.addEventListener("click", startFbScrape);
+  document.getElementById("fb-scrape-export-btn")?.addEventListener("click", () => {
+    const params = new URLSearchParams({ source_platform: "facebook" });
+    const clientId = document.getElementById("fb-scrape-client-select").value || state.clientId;
+    if (clientId) params.set("client_id", clientId);
+    window.open(`/api/creators/export?${params.toString()}`, "_blank");
+  });
 }
 
 function initYtScrape() {
@@ -1410,6 +1420,30 @@ async function loadScrape() {
     if (current) sel.value = current;
   }
   renderScrapeStats();
+}
+
+async function loadFbScrape() {
+  const clients = await api("/api/clients").catch(() => []);
+  const options = clients.length
+    ? clients.map((c) => `<option value="${c.id}">${escapeHtml(c.brand_display_name || c.client_name)}</option>`).join("")
+    : '<option value="">No clients yet — add one in the Clients tab first</option>';
+  const sel = document.getElementById("fb-scrape-client-select");
+  if (sel) {
+    const current = sel.value;
+    sel.innerHTML = options;
+    if (current) sel.value = current;
+  }
+  renderFbScrapeStats();
+}
+
+async function renderFbScrapeStats() {
+  const qs = state.clientId ? `?client_id=${state.clientId}` : "";
+  const breakdown = await api(`/api/platform-breakdown${qs}`).catch(() => ({}));
+  const fb = breakdown.facebook || { total: 0, whatsapp_ready: 0 };
+  document.getElementById("fb-scrape-stats").innerHTML = `
+    <div class="pipeline-row"><span class="pipeline-icon">📘</span><span class="pipeline-label">Facebook pages scraped</span><span class="pipeline-count">${fb.total}</span></div>
+    <div class="pipeline-row"><span class="pipeline-icon">🟢</span><span class="pipeline-label">→ Routed to WhatsApp</span><span class="pipeline-count">${fb.whatsapp_ready}</span></div>
+  `;
 }
 
 async function loadYtScrape() {
@@ -1488,8 +1522,8 @@ async function startScrape() {
   }
 }
 
-function pollScrape(runId, clientId, setStatus = setScrapeStatus, unit = "reels") {
-  const params = new URLSearchParams({ run_id: runId, client_id: clientId, platform: "instagram" });
+function pollScrape(runId, clientId, setStatus = setScrapeStatus, unit = "reels", platform = "instagram") {
+  const params = new URLSearchParams({ run_id: runId, client_id: clientId, platform: platform });
   let ticks = 0;
   return new Promise((resolve) => {
     const tick = async () => {
@@ -1507,7 +1541,7 @@ function pollScrape(runId, clientId, setStatus = setScrapeStatus, unit = "reels"
             "success",
           );
           showToast(`Scrape complete: ${res.total_creators ?? 0} creators imported`, "success");
-          renderScrapeStats();
+          if (platform === "facebook") renderFbScrapeStats(); else renderScrapeStats();
           refreshWhatsappBadge();
           return resolve();
         }
@@ -1560,7 +1594,7 @@ async function startHashtagScrape() {
       method: "POST",
       body: JSON.stringify({ client_id: clientId, hashtags, content_type: contentType, results_limit: resultsLimit }),
     });
-    await pollScrape(start.run_id, clientId, setHashtagStatus, "results");
+    await pollScrape(start.run_id, clientId, setHashtagStatus, "results", "instagram");
   } catch (err) {
     setHashtagStatus(err.message, "error");
     showToast(err.message, "error");
@@ -1568,6 +1602,53 @@ async function startHashtagScrape() {
     scrapePolling = false;
     btn.disabled = false;
   }
+}
+
+async function startFbScrape() {
+  if (scrapePolling) {
+    showToast("Another scrape is already running", "error");
+    return;
+  }
+  const clientId = document.getElementById("fb-scrape-client-select").value;
+  if (!clientId) {
+    setFbScrapeStatus("Pick a client first.", "error");
+    showToast("Select a client before scraping", "error");
+    return;
+  }
+
+  const targets = document.getElementById("fb-scrape-targets").value
+    .split(/[\n,]+/).map((s) => s.trim()).filter(Boolean);
+  if (!targets.length) {
+    setFbScrapeStatus("Enter at least one Facebook page URL.", "error");
+    return;
+  }
+
+  const resultsLimit = Number(document.getElementById("fb-scrape-limit").value) || 10;
+  const btn = document.getElementById("fb-scrape-btn");
+  btn.disabled = true;
+  scrapePolling = true;
+  setFbScrapeStatus(`Starting scrape of ${targets.length} Facebook page(s)...`, "");
+  showToast(`Scraping ${targets.length} Facebook page(s)...`, "info");
+
+  try {
+    const start = await api("/api/scrape", {
+      method: "POST",
+      body: JSON.stringify({ client_id: clientId, platform: "facebook", targets, results_limit: resultsLimit }),
+    });
+    await pollScrape(start.run_id, clientId, setFbScrapeStatus, "pages", "facebook");
+  } catch (err) {
+    setFbScrapeStatus(err.message, "error");
+    showToast(err.message, "error");
+  } finally {
+    scrapePolling = false;
+    btn.disabled = false;
+  }
+}
+
+function setFbScrapeStatus(msg, type = "") {
+  const el = document.getElementById("fb-scrape-status");
+  el.textContent = msg;
+  el.className = "scrape-status" + (type ? ` status-${type}` : "");
 }
 
 // --- WhatsApp dashboard ─────────────────────────────────────────────────────

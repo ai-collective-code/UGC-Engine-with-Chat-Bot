@@ -46,6 +46,8 @@ from flask import Flask, jsonify, request, send_from_directory, Response
 # Apify actor that backs in-app Instagram scraping (apify/instagram-reel-scraper).
 # Override with APIFY_INSTAGRAM_ACTOR if you fork or swap the actor.
 INSTAGRAM_ACTOR = os.environ.get("APIFY_INSTAGRAM_ACTOR", "apify~instagram-reel-scraper")
+# Facebook actor for page scraping.
+FACEBOOK_ACTOR = os.environ.get("APIFY_FACEBOOK_ACTOR", "apify~facebook-pages-scraper")
 # Apify actor for hashtag-based discovery (apify/instagram-hashtag-scraper): finds
 # posts/reels carrying a hashtag, so you can source creators you don't already know.
 # Its items expose the same ownerUsername/caption/hashtags fields the reel scraper
@@ -754,26 +756,35 @@ def api_scrape_start():
         return jsonify({"error": "valid client_id is required"}), 400
 
     platform = (payload.get("platform") or "instagram").strip().lower()
-    if platform != "instagram":
-        return jsonify({"error": "In-app scraping is wired for Instagram only right now."}), 400
+    if platform not in {"instagram", "facebook"}:
+        return jsonify({"error": "In-app scraping supports Instagram and Facebook only right now."}), 400
 
     targets = [str(t).strip() for t in (payload.get("targets") or []) if str(t).strip()]
     if not targets:
         return jsonify({"error": "Enter at least one username, profile URL, or reel URL."}), 400
 
     results_limit = max(1, min(_to_int(payload.get("results_limit"), 25), 200))
-    run_input = {
-        "username": targets,
-        "resultsLimit": results_limit,
-        "skipPinnedPosts": False,
-        "skipTrialReels": False,
-        "includeSharesCount": False,
-        "includeTranscript": False,
-        "includeDownloadedVideo": False
-    }
+    
+    if platform == "facebook":
+        actor_to_run = FACEBOOK_ACTOR
+        run_input = {
+            "startUrls": [{"url": t if t.startswith("http") else f"https://www.facebook.com/{t}"} for t in targets],
+            "resultsLimit": results_limit,
+        }
+    else:
+        actor_to_run = INSTAGRAM_ACTOR
+        run_input = {
+            "username": targets,
+            "resultsLimit": results_limit,
+            "skipPinnedPosts": False,
+            "skipTrialReels": False,
+            "includeSharesCount": False,
+            "includeTranscript": False,
+            "includeDownloadedVideo": False
+        }
 
     try:
-        run = apify_client.start_run(INSTAGRAM_ACTOR, run_input)
+        run = apify_client.start_run(actor_to_run, run_input)
     except Exception as e:
         return jsonify({"error": str(e)}), 502
     return jsonify({"run_id": run["run_id"], "status": run["status"]})

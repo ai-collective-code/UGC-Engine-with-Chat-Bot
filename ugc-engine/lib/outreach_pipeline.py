@@ -587,6 +587,69 @@ def apify_reels_to_df(items, cfg):
     return pd.DataFrame(enriched)
 
 
+def apify_facebook_to_df(items, cfg):
+    """Turn a list of Apify Facebook Page items into one row per page."""
+    phone_re = re.compile(cfg["phone_regex"])
+    default_lang = cfg.get("default_language", "Hindi")
+
+    enriched = []
+    for it in items:
+        # Depending on the actor, it might be pageUrl, title, phone, etc.
+        url = str(it.get("pageUrl") or it.get("url") or "").strip()
+        if not url:
+            continue
+        
+        username = url.split("facebook.com/")[-1].split("/")[0].strip()
+        title = str(it.get("title") or it.get("pageName") or username).strip()
+        raw_phone = str(it.get("phone") or "")
+        phone = _phone_from(raw_phone, phone_re) if raw_phone else ""
+        about = str(it.get("about") or it.get("description") or "")
+        
+        if not phone and about:
+            phone = _phone_from(about, phone_re)
+            
+        location = str(it.get("city") or "")
+        language, matched_state, confidence = (
+            resolve_language(location) if location else (None, None, "none")
+        )
+        if not language:
+            language = default_lang
+
+        enriched.append({
+            "Full Name": title,
+            "Username": username,
+            "Profile Link": url,
+            "Location (raw)": location,
+            "Matched State": matched_state or "",
+            "Language": language,
+            "Language Confidence": confidence,
+            "Niche": "",
+            "Phone": phone,
+            "Caption Sample": about[:120],
+        })
+
+    return pd.DataFrame(enriched)
+
+
+def store_apify_items(cfg, client_id, items, platform="instagram"):
+    """Map Apify items -> creators and insert them. Returns
+    {total, whatsapp_ready}. Any creator with a phone auto-routes to WhatsApp."""
+    if platform == "facebook":
+        df = apify_facebook_to_df(items, cfg)
+    else:
+        df = apify_reels_to_df(items, cfg)
+        
+    df = build_messages(df, cfg)
+    if not df.empty:
+        df["Phone"] = df["Phone"].fillna("").astype(str)
+        df["WhatsApp Link"] = df.apply(
+            lambda r: wa_link(r["Phone"], r["Personalized Message"]), axis=1
+        )
+    rows = rows_for_db(df, platform)
+    local_db.insert_creators(client_id, rows)
+    return {"total": len(rows), "whatsapp_ready": sum(1 for r in rows if r["phone"])}
+
+
 def youtube_channels_to_df(channels, cfg):
     """Turn YouTube channels (from lib/youtube_client) into creator rows.
 

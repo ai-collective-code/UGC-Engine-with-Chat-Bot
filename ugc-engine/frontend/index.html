@@ -248,8 +248,8 @@
         <div class="panel scrape-panel">
           <div class="upload-intro-row">
             <div class="panel-head" style="margin:0">
-              <h2>📘 Facebook Scraper <span class="scrape-live-tag">live · Apify</span></h2>
-              <span class="panel-hint">Pull Facebook pages straight into the platform. Enter Facebook page URLs (one per line). Any phone number found is routed to WhatsApp automatically. Uses your Apify credits.</span>
+              <h2>📘 Scrape Facebook Pages by URL <span class="scrape-live-tag">live · Apify</span></h2>
+              <span class="panel-hint"><b>Page links only</b> — one per line (<code>https://www.facebook.com/somepage</code> or <code>@handle</code>). Searching by keyword? Use the <b>Find Facebook Pages</b> panel below instead. Any phone number found is routed to WhatsApp automatically. Uses your Apify credits.</span>
             </div>
             <label class="upload-client-label">
               Client
@@ -267,6 +267,33 @@
           </div>
           <div class="scrape-status" id="fb-scrape-status"></div>
         </div>
+
+        <div class="panel scrape-panel">
+          <div class="upload-intro-row">
+            <div class="panel-head" style="margin:0">
+              <h2>🔎 Find Facebook Pages <span class="scrape-live-tag">live · Apify</span></h2>
+              <span class="panel-hint">Search for pages you don't know yet by keyword or hashtag (one per line — e.g. "tiles shop" or "#tilingwork"), optionally narrowed by location. Uses your Apify credits.</span>
+            </div>
+            <label class="upload-client-label">
+              Client
+              <select id="fb-search-client-select" required></select>
+            </label>
+          </div>
+          <div class="scrape-row">
+            <textarea id="fb-search-keywords" class="scrape-targets" rows="3" placeholder="tiles shop&#10;hardware store&#10;#tilingwork"></textarea>
+            <div class="scrape-controls">
+              <label class="scrape-limit-label">Location <small>(optional)</small>
+                <input type="text" id="fb-search-location" placeholder="e.g. Mumbai" style="width: 140px">
+              </label>
+              <label class="scrape-limit-label">Max results
+                <input type="number" id="fb-search-limit" value="20" min="1" max="200">
+              </label>
+              <button class="btn btn-primary" id="fb-search-btn">🔎 Search</button>
+            </div>
+          </div>
+          <div class="scrape-status" id="fb-search-status"></div>
+        </div>
+
         <div class="panel">
           <div class="panel-head" style="margin-bottom:12px; display:flex; align-items:center; justify-content:space-between; gap:12px;">
             <div>

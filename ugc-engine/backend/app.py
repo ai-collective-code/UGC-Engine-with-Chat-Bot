@@ -48,6 +48,10 @@ from flask import Flask, jsonify, request, send_from_directory, Response
 INSTAGRAM_ACTOR = os.environ.get("APIFY_INSTAGRAM_ACTOR", "apify~instagram-reel-scraper")
 # Facebook actor for page scraping.
 FACEBOOK_ACTOR = os.environ.get("APIFY_FACEBOOK_ACTOR", "apify~facebook-pages-scraper")
+# Apify actor for keyword/hashtag-based Facebook Page discovery (apify/facebook-
+# search-scraper). Its dataset items expose the same pageUrl/title/phone/email
+# fields facebook-pages-scraper does, so apify_facebook_to_df handles either one.
+FACEBOOK_SEARCH_ACTOR = os.environ.get("APIFY_FACEBOOK_SEARCH_ACTOR", "apify~facebook-search-scraper")
 # Apify actor for hashtag-based discovery (apify/instagram-hashtag-scraper): finds
 # posts/reels carrying a hashtag, so you can source creators you don't already know.
 # Its items expose the same ownerUsername/caption/hashtags fields the reel scraper
@@ -766,6 +770,16 @@ def api_scrape_start():
     results_limit = max(1, min(_to_int(payload.get("results_limit"), 25), 200))
     
     if platform == "facebook":
+        # Page URLs/handles only. A free-text search term would be pasted onto
+        # facebook.com/ and scraped as a dead URL -- Apify credits spent for a
+        # guaranteed 0 results -- so reject it and point at /api/scrape/facebook-search.
+        keyword_like = [t for t in targets if "facebook.com" not in t.lower() and " " in t]
+        if keyword_like:
+            return jsonify({"error": (
+                f'"{keyword_like[0]}" looks like a search term, not a page URL. This endpoint takes '
+                'Facebook page links or handles; use /api/scrape/facebook-search (the "Find Facebook '
+                'Pages" panel) to search by keyword or hashtag.'
+            )}), 400
         actor_to_run = FACEBOOK_ACTOR
         run_input = {
             "startUrls": [{"url": t if t.startswith("http") else f"https://www.facebook.com/{t}"} for t in targets],
@@ -835,6 +849,42 @@ def api_scrape_hashtag_start():
     return jsonify({"run_id": run["run_id"], "status": run["status"]})
 
 
+@app.route("/api/scrape/facebook-search", methods=["POST"])
+def api_scrape_facebook_search_start():
+    """Kick off an Apify Facebook Page SEARCH (apify/facebook-search-scraper):
+    finds Pages matching keywords/hashtags you don't already have a URL for,
+    optionally narrowed by location. Returns a run_id to poll via the same
+    /api/scrape/status endpoint (platform=facebook), since this actor's dataset
+    items are shaped identically to the direct-URL page scraper's."""
+    if not apify_client.is_configured():
+        return jsonify({"error": "APIFY_TOKEN is not set in .env — add it, then restart the dashboard."}), 400
+
+    payload = request.get_json(silent=True) or {}
+    client_id = payload.get("client_id")
+    if not client_id or not local_db.get_client(client_id):
+        return jsonify({"error": "valid client_id is required"}), 400
+
+    # Plain keywords and "#hashtags" both work as-is -- Facebook search indexes
+    # hashtags as ordinary searchable strings, unlike Instagram's separate tag pages.
+    keywords = [str(k).strip() for k in (payload.get("keywords") or []) if str(k).strip()]
+    if not keywords:
+        return jsonify({"error": "Enter at least one keyword or hashtag."}), 400
+
+    locations = [str(l).strip() for l in (payload.get("locations") or []) if str(l).strip()]
+    results_limit = max(1, min(_to_int(payload.get("results_limit"), 20), 200))
+    run_input = {
+        "categories": keywords,
+        "locations": locations,
+        "resultsLimit": results_limit,
+    }
+
+    try:
+        run = apify_client.start_run(FACEBOOK_SEARCH_ACTOR, run_input)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 502
+    return jsonify({"run_id": run["run_id"], "status": run["status"]})
+
+
 @app.route("/api/scrape/status", methods=["GET"])
 def api_scrape_status():
     """Poll a scrape run. On SUCCEEDED, fetch the dataset, import the creators
@@ -885,6 +935,7 @@ def api_scrape_status():
         "scraped_items": len(items),
         "total_creators": result["total"],
         "whatsapp_ready": result["whatsapp_ready"],
+        "blocked": result.get("blocked", 0),
     })
 
 

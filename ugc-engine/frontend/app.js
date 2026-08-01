@@ -1386,6 +1386,7 @@ function initScrape() {
     if (clientId) params.set("client_id", clientId);
     window.open(`/api/creators/export?${params.toString()}`, "_blank");
   });
+  document.getElementById("fb-search-btn")?.addEventListener("click", startFbSearch);
 }
 
 function initYtScrape() {
@@ -1427,8 +1428,9 @@ async function loadFbScrape() {
   const options = clients.length
     ? clients.map((c) => `<option value="${c.id}">${escapeHtml(c.brand_display_name || c.client_name)}</option>`).join("")
     : '<option value="">No clients yet — add one in the Clients tab first</option>';
-  const sel = document.getElementById("fb-scrape-client-select");
-  if (sel) {
+  for (const id of ["fb-scrape-client-select", "fb-search-client-select"]) {
+    const sel = document.getElementById(id);
+    if (!sel) continue;
     const current = sel.value;
     sel.innerHTML = options;
     if (current) sel.value = current;
@@ -1536,9 +1538,10 @@ function pollScrape(runId, clientId, setStatus = setScrapeStatus, unit = "reels"
         }
         const st = (res.status || "").toUpperCase();
         if (st === "SUCCEEDED" && res.imported) {
+          const blockedNote = res.blocked ? ` ${res.blocked} page(s) were blocked by Facebook (private/login-walled) and skipped.` : "";
           setStatus(
-            `Done — scraped ${res.scraped_items ?? 0} ${unit} → ${res.total_creators ?? 0} creators, ${res.whatsapp_ready ?? 0} WhatsApp-ready.`,
-            "success",
+            `Done — scraped ${res.scraped_items ?? 0} ${unit} → ${res.total_creators ?? 0} creators, ${res.whatsapp_ready ?? 0} WhatsApp-ready.${blockedNote}`,
+            res.total_creators || !res.blocked ? "success" : "error",
           );
           showToast(`Scrape complete: ${res.total_creators ?? 0} creators imported`, "success");
           if (platform === "facebook") renderFbScrapeStats(); else renderScrapeStats();
@@ -1623,6 +1626,22 @@ async function startFbScrape() {
     return;
   }
 
+  // This box takes page URLs/handles only. A free-text search term ("tiles
+  // mistri") would be pasted onto facebook.com/ and scraped as a dead URL --
+  // burning Apify credits for a guaranteed 0 results -- so catch it here and
+  // point at the keyword search panel below, which is built for exactly that.
+  const keywordLike = targets.filter((t) => !/facebook\.com/i.test(t) && /\s/.test(t));
+  if (keywordLike.length) {
+    setFbScrapeStatus(
+      `"${keywordLike[0]}" looks like a search term, not a page URL. This box takes Facebook page links `
+      + `(https://www.facebook.com/somepage) or @handles. To search by keyword or hashtag, use the `
+      + `"Find Facebook Pages" panel below instead.`,
+      "error",
+    );
+    showToast("Use the keyword search panel below for search terms", "error");
+    return;
+  }
+
   const resultsLimit = Number(document.getElementById("fb-scrape-limit").value) || 10;
   const btn = document.getElementById("fb-scrape-btn");
   btn.disabled = true;
@@ -1647,6 +1666,59 @@ async function startFbScrape() {
 
 function setFbScrapeStatus(msg, type = "") {
   const el = document.getElementById("fb-scrape-status");
+  el.textContent = msg;
+  el.className = "scrape-status" + (type ? ` status-${type}` : "");
+}
+
+async function startFbSearch() {
+  if (scrapePolling) {
+    showToast("Another scrape is already running", "error");
+    return;
+  }
+  const clientId = document.getElementById("fb-search-client-select").value;
+  if (!clientId) {
+    setFbSearchStatus("Pick a client first.", "error");
+    showToast("Select a client before searching", "error");
+    return;
+  }
+
+  const keywords = document.getElementById("fb-search-keywords").value
+    .split("\n").map((s) => s.trim()).filter(Boolean);
+  if (!keywords.length) {
+    setFbSearchStatus("Enter at least one keyword or hashtag.", "error");
+    return;
+  }
+
+  const location = document.getElementById("fb-search-location").value.trim();
+  const resultsLimit = Number(document.getElementById("fb-search-limit").value) || 20;
+  const btn = document.getElementById("fb-search-btn");
+  btn.disabled = true;
+  scrapePolling = true;
+  setFbSearchStatus(`Searching for ${keywords.length} keyword(s)/hashtag(s)…`, "");
+  showToast(`Searching Facebook for ${keywords.length} keyword(s)...`, "info");
+
+  try {
+    const start = await api("/api/scrape/facebook-search", {
+      method: "POST",
+      body: JSON.stringify({
+        client_id: clientId,
+        keywords,
+        locations: location ? [location] : [],
+        results_limit: resultsLimit,
+      }),
+    });
+    await pollScrape(start.run_id, clientId, setFbSearchStatus, "pages", "facebook");
+  } catch (err) {
+    setFbSearchStatus(err.message, "error");
+    showToast(err.message, "error");
+  } finally {
+    scrapePolling = false;
+    btn.disabled = false;
+  }
+}
+
+function setFbSearchStatus(msg, type = "") {
+  const el = document.getElementById("fb-search-status");
   el.textContent = msg;
   el.className = "scrape-status" + (type ? ` status-${type}` : "");
 }

@@ -594,6 +594,11 @@ def apify_facebook_to_df(items, cfg):
 
     enriched = []
     for it in items:
+        # Facebook frequently blocks this actor (login wall / anti-scraping) --
+        # those items carry an "error" key and no real page data, so skip them
+        # instead of turning them into a near-empty ghost creator row.
+        if it.get("error"):
+            continue
         # Depending on the actor, it might be pageUrl, title, phone, etc.
         url = str(it.get("pageUrl") or it.get("url") or "").strip()
         if not url:
@@ -633,12 +638,16 @@ def apify_facebook_to_df(items, cfg):
 
 def store_apify_items(cfg, client_id, items, platform="instagram"):
     """Map Apify items -> creators and insert them. Returns
-    {total, whatsapp_ready}. Any creator with a phone auto-routes to WhatsApp."""
+    {total, whatsapp_ready, blocked}. Any creator with a phone auto-routes to
+    WhatsApp. `blocked` counts Facebook items Facebook itself refused to serve
+    (login wall / anti-scraping) -- always 0 for other platforms."""
     if platform == "facebook":
         df = apify_facebook_to_df(items, cfg)
+        blocked = sum(1 for it in items if it.get("error"))
     else:
         df = apify_reels_to_df(items, cfg)
-        
+        blocked = 0
+
     df = build_messages(df, cfg)
     if not df.empty:
         df["Phone"] = df["Phone"].fillna("").astype(str)
@@ -647,7 +656,7 @@ def store_apify_items(cfg, client_id, items, platform="instagram"):
         )
     rows = rows_for_db(df, platform)
     local_db.insert_creators(client_id, rows)
-    return {"total": len(rows), "whatsapp_ready": sum(1 for r in rows if r["phone"])}
+    return {"total": len(rows), "whatsapp_ready": sum(1 for r in rows if r["phone"]), "blocked": blocked}
 
 
 def youtube_channels_to_df(channels, cfg):

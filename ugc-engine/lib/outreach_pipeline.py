@@ -587,6 +587,46 @@ def apify_reels_to_df(items, cfg):
     return pd.DataFrame(enriched)
 
 
+def _fb_username_from_url(url):
+    """Stable per-page handle out of a Facebook URL.
+
+    Pages without a vanity URL come back as /p/Name-<id> or /people/Name/<id>,
+    where naively taking the first path segment yields "p" or "people" for every
+    such page. Creators upsert on (client_id, username, channel), so that would
+    collapse an entire search into one row -- hence the prefix handling.
+    """
+    slug = str(url or "").split("facebook.com/", 1)[-1].strip("/")
+    if not slug:
+        return ""
+    if slug.lower().startswith("profile.php"):
+        m = re.search(r"id=(\d+)", slug)
+        return m.group(1) if m else "profile.php"
+    parts = [p for p in slug.split("?", 1)[0].split("/") if p]
+    if not parts:
+        return ""
+    # The trailing segment is the numeric/slug id that actually identifies the page.
+    if parts[0].lower() in {"p", "people", "pages", "pg"} and len(parts) > 1:
+        return parts[-1]
+    return parts[0]
+
+
+def _mobile_from_structured(raw):
+    """Bare 10-digit Indian mobile from a structured phone field, or "".
+
+    Deliberately NOT _phone_from: that scans free text for anything mobile-shaped,
+    which on a landline like "+91 33 2556 8277" collapses to 913325568277 and
+    happily matches 9133255682 -- a real number belonging to somebody else, who
+    would then get WhatsApped. A structured field is exact, so parse it exactly
+    and drop anything that isn't a mobile.
+    """
+    digits = re.sub(r"\D", "", str(raw or ""))
+    if len(digits) == 12 and digits.startswith("91"):
+        digits = digits[2:]
+    elif len(digits) == 11 and digits.startswith("0"):
+        digits = digits[1:]
+    return digits if (len(digits) == 10 and digits[0] in "6789") else ""
+
+
 def apify_facebook_to_df(items, cfg):
     """Turn a list of Apify Facebook Page items into one row per page."""
     phone_re = re.compile(cfg["phone_regex"])
@@ -604,21 +644,34 @@ def apify_facebook_to_df(items, cfg):
         if not url:
             continue
         
-        username = url.split("facebook.com/")[-1].split("/")[0].strip()
+        username = _fb_username_from_url(url) or str(it.get("pageId") or "").strip()
+        if not username:
+            continue  # nothing stable to key the creator on
         title = str(it.get("title") or it.get("pageName") or username).strip()
-        raw_phone = str(it.get("phone") or "")
-        phone = _phone_from(raw_phone, phone_re) if raw_phone else ""
-        about = str(it.get("about") or it.get("description") or "")
-        
+        # The structured phone field is exact -- parse it strictly. Only fall back
+        # to scanning the free-text intro when the page lists no phone at all.
+        phone = _mobile_from_structured(it.get("phone"))
+        about = str(it.get("intro") or it.get("about") or it.get("description") or "")
+
         if not phone and about:
             phone = _phone_from(about, phone_re)
-            
-        location = str(it.get("city") or "")
+
+        # Business email is the other contact detail these pages expose; it has no
+        # column of its own, so it rides in Notes the same way YouTube's does.
+        email = str(it.get("email") or "").strip()
+
+        # These pages carry a full street address rather than a city field, and it
+        # is the only regional signal on offer -- without it every Kolkata shop
+        # would fall through to the default language.
+        location = str(it.get("city") or it.get("address") or "").strip()
         language, matched_state, confidence = (
             resolve_language(location) if location else (None, None, "none")
         )
         if not language:
             language = default_lang
+
+        cats = it.get("categories") or []
+        niche = ", ".join(str(c) for c in cats[:3]) if isinstance(cats, list) else str(cats)
 
         enriched.append({
             "Full Name": title,
@@ -628,9 +681,10 @@ def apify_facebook_to_df(items, cfg):
             "Matched State": matched_state or "",
             "Language": language,
             "Language Confidence": confidence,
-            "Niche": "",
+            "Niche": niche,
             "Phone": phone,
             "Caption Sample": about[:120],
+            "Notes": f"Email: {email}" if email else "",
         })
 
     return pd.DataFrame(enriched)

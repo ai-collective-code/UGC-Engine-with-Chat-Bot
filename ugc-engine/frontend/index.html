@@ -77,6 +77,9 @@
         <button class="nav-item" data-section="clients" id="nav-clients">
           <span class="nav-icon">🏢</span> Clients
         </button>
+        <button class="nav-item" data-section="shopfinder" id="nav-shopfinder">
+          <span class="nav-icon">🔎</span> Shop Finder
+        </button>
         <button class="nav-item" data-section="shops" id="nav-shops">
           <span class="nav-icon">📞</span> Shop Verify
         </button>
@@ -825,12 +828,12 @@
         </div>
       </section>
 
-      <!-- ═══ SHOP VERIFY (human-assisted dialer) ═══ -->
-      <section id="section-shops" class="section" hidden>
+      <!-- ═══ SHOP FINDER (local hardware & tiles shop search) ═══ -->
+      <section id="section-shopfinder" class="section" hidden>
         <div class="panel">
           <div class="panel-head">
-            <h2>Search shops by city</h2>
-            <span class="panel-hint">Type any city and pull every tile &amp; hardware shop (name + Google phone number) into the call queue.</span>
+            <h2>🔎 Search shops by city</h2>
+            <span class="panel-hint">Type any city and pull every tile &amp; hardware shop (name + Google phone number) into the call queue. Results land in the <b>Shop Verify</b> tab's call queue.</span>
           </div>
           <form id="shops-city-form" class="form-grid">
             <label class="full-width">City / area<input name="city" id="shops-city-input" placeholder="Bangalore, Karnataka" autocomplete="off"></label>
@@ -840,6 +843,10 @@
             <div class="form-message" id="shops-city-message"></div>
           </form>
         </div>
+      </section>
+
+      <!-- ═══ SHOP VERIFY (human-assisted dialer) ═══ -->
+      <section id="section-shops" class="section" hidden>
         <div class="panel">
           <div class="panel-head">
             <h2>Finalized creators</h2>

@@ -191,6 +191,7 @@ function switchSection(section) {
     whatsapp: "WhatsApp Contacts", creators: "Creators", conversations: "Conversations",
     spinner: "Message Variations",
     ops: "Ops Pipeline", dealers: "Dealers", actions: "Needs Action", clients: "Clients",
+    shopfinder: "Shop Finder", shops: "Shop Verify",
   };
   document.getElementById("section-title").textContent = titles[section] || section;
   loadSection(section);
@@ -213,6 +214,7 @@ function loadSection(section) {
   if (section === "spinner") return loadSpinner();
   if (section === "actions") return loadActions();
   if (section === "clients") return loadClients();
+  if (section === "shopfinder") return loadShopFinder();
   if (section === "shops") return loadShops();
 }
 
@@ -1787,18 +1789,31 @@ const SHOP_STATUS_LABEL = {
 };
 const BTN_SM = "padding:4px 9px; font-size:11px";
 
-async function loadShops() {
+async function fetchOptionalClientOpts() {
   const clients = await api("/api/clients").catch(() => []);
-  const clientOpts = '<option value="">— optional —</option>' + clients.map(
+  return '<option value="">— optional —</option>' + clients.map(
     (c) => `<option value="${c.id}">${escapeHtml(c.brand_display_name || c.client_name)}</option>`
   ).join("");
-  ["shops-client-select", "shops-city-client"].forEach((id) => {
-    const sel = document.getElementById(id);
-    if (!sel) return;
+}
+
+async function loadShopFinder() {
+  const clientOpts = await fetchOptionalClientOpts();
+  const sel = document.getElementById("shops-city-client");
+  if (sel) {
     const cur = sel.value;
     sel.innerHTML = clientOpts;
     sel.value = cur;
-  });
+  }
+}
+
+async function loadShops() {
+  const clientOpts = await fetchOptionalClientOpts();
+  const sel = document.getElementById("shops-client-select");
+  if (sel) {
+    const cur = sel.value;
+    sel.innerHTML = clientOpts;
+    sel.value = cur;
+  }
 
   // Finalized creators (agreed on WhatsApp = status "Converted"). Each gets a
   // "Find shops" button that auto-sources nearby shops for their location.

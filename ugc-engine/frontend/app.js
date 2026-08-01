@@ -1229,9 +1229,144 @@ function setHashtagStatus(text, cls) {
   el.className = "scrape-status" + (cls ? " " + cls : "");
 }
 
+// ── YouTube sourcing ─────────────────────────────────────────────────────────
+// Unlike the Apify scrapes these are synchronous — the YouTube API answers in
+// well under a second, so there's no run to poll. The constraint is quota, not
+// time, so every result reports what the call spent.
+
+function setYtStatus(id, text, cls) {
+  const el = document.getElementById(id);
+  el.textContent = text;
+  el.className = "scrape-status" + (cls ? " " + cls : "");
+}
+
+function ytNum(n) {
+  return n === null || n === undefined ? "—" : Number(n).toLocaleString("en-IN");
+}
+
+function renderYtChannels(containerId, data) {
+  const el = document.getElementById(containerId);
+  const channels = data.channels || [];
+  if (!channels.length) {
+    el.style.display = "none";
+    return;
+  }
+  el.style.display = "block";
+
+  const rows = channels.map((c) => {
+    // Surface the contact details found in the description prominently — they're
+    // the reason for pulling channels in the first place.
+    const email = (c.emails || [])[0];
+    const contact = [
+      email ? `<span class="tag-chip">✉ ${escapeHtml(email)}</span>` : "",
+      (c.keywords || []).slice(0, 3).map((k) => `<span class="tag-chip">${escapeHtml(k)}</span>`).join(" "),
+    ].filter(Boolean).join(" ");
+    return `<tr>
+      <td><a href="${escapeHtml(c.url)}" target="_blank" rel="noopener">${escapeHtml(c.title || c.handle)}</a>
+          <div style="color:var(--text-muted); font-size:11.5px;">${escapeHtml(c.handle ? "@" + c.handle : c.channel_id)}${c.country ? " · " + escapeHtml(c.country) : ""}</div></td>
+      <td style="text-align:right; font-variant-numeric:tabular-nums;">${c.hidden_subscriber_count ? "hidden" : ytNum(c.subscriber_count)}</td>
+      <td style="text-align:right; font-variant-numeric:tabular-nums;">${ytNum(c.video_count)}</td>
+      <td>${contact || '<span style="color:var(--text-muted)">—</span>'}</td>
+    </tr>`;
+  }).join("");
+
+  const imported = data.imported;
+  const summary = imported
+    ? `Saved ${imported.total} creator(s) — ${imported.whatsapp_ready} with a phone (routed to WhatsApp), ${imported.with_email} with an email.`
+    : "Preview only — nothing saved.";
+  const missing = (data.not_found || []).length
+    ? `<div style="color:var(--accent-amber); font-size:12px; margin-top:8px;">Not found: ${(data.not_found || []).map(escapeHtml).join(", ")}</div>`
+    : "";
+
+  el.innerHTML = `
+    <div style="color:var(--text-secondary); font-size:12.5px; margin-bottom:10px;">
+      ${escapeHtml(summary)} <span style="color:var(--text-muted)">· ${data.quota_units} of 10,000 daily quota units used</span>
+    </div>
+    <div class="table-wrap">
+      <table><thead><tr>
+        <th>Channel</th><th style="text-align:right">Subscribers</th>
+        <th style="text-align:right">Videos</th><th>Found in description</th>
+      </tr></thead><tbody>${rows}</tbody></table>
+    </div>${missing}`;
+}
+
+async function fetchYtChannels() {
+  const clientId = document.getElementById("yt-client-select").value;
+  if (!clientId) return setYtStatus("yt-status", "Pick a client first.", "error");
+
+  const targets = document.getElementById("yt-targets").value
+    .split("\n").map((s) => s.trim()).filter(Boolean);
+  if (!targets.length) {
+    return setYtStatus("yt-status", "Paste at least one channel URL, @handle or channel ID.", "error");
+  }
+
+  const btn = document.getElementById("yt-btn");
+  btn.disabled = true;
+  setYtStatus("yt-status", `Fetching ${targets.length} channel(s)…`);
+  try {
+    const res = await api("/api/youtube/channels", {
+      method: "POST",
+      body: JSON.stringify({
+        client_id: clientId,
+        targets,
+        import: document.getElementById("yt-import").checked,
+      }),
+    });
+    if (res.error) {
+      setYtStatus("yt-status", res.error, "error");
+      renderYtChannels("yt-results", res);
+    } else {
+      setYtStatus("yt-status", "");
+      renderYtChannels("yt-results", res);
+      if (res.imported) renderScrapeStats();
+    }
+  } catch (err) {
+    setYtStatus("yt-status", err.message, "error");
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function searchYtChannels() {
+  const clientId = document.getElementById("yt-search-client-select").value;
+  if (!clientId) return setYtStatus("yt-search-status", "Pick a client first.", "error");
+
+  const query = document.getElementById("yt-query").value.trim();
+  if (!query) return setYtStatus("yt-search-status", "Enter a search term.", "error");
+
+  const btn = document.getElementById("yt-search-btn");
+  btn.disabled = true;
+  setYtStatus("yt-search-status", `Searching for "${query}"… (costs 100 quota units)`);
+  try {
+    const res = await api("/api/youtube/search", {
+      method: "POST",
+      body: JSON.stringify({
+        client_id: clientId,
+        query,
+        limit: Number(document.getElementById("yt-search-limit").value) || 10,
+        import: document.getElementById("yt-search-import").checked,
+      }),
+    });
+    if (res.error) {
+      setYtStatus("yt-search-status", res.error, "error");
+      renderYtChannels("yt-search-results", res);
+    } else {
+      setYtStatus("yt-search-status", res.channels?.length ? "" : "No channels matched that search.");
+      renderYtChannels("yt-search-results", res);
+      if (res.imported) renderScrapeStats();
+    }
+  } catch (err) {
+    setYtStatus("yt-search-status", err.message, "error");
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 function initScrape() {
   document.getElementById("scrape-btn").addEventListener("click", startScrape);
   document.getElementById("hashtag-btn").addEventListener("click", startHashtagScrape);
+  document.getElementById("yt-btn").addEventListener("click", fetchYtChannels);
+  document.getElementById("yt-search-btn").addEventListener("click", searchYtChannels);
   document.getElementById("scrape-export-btn").addEventListener("click", () => {
     const params = new URLSearchParams({ source_platform: "instagram" });
     const clientId = document.getElementById("scrape-client-select").value || state.clientId;
@@ -1253,7 +1388,8 @@ async function loadScrape() {
   const options = clients.length
     ? clients.map((c) => `<option value="${c.id}">${escapeHtml(c.brand_display_name || c.client_name)}</option>`).join("")
     : '<option value="">No clients yet — add one in the Clients tab first</option>';
-  for (const id of ["scrape-client-select", "hashtag-client-select"]) {
+  for (const id of ["scrape-client-select", "hashtag-client-select",
+                    "yt-client-select", "yt-search-client-select"]) {
     const sel = document.getElementById(id);
     if (!sel) continue;
     const current = sel.value;

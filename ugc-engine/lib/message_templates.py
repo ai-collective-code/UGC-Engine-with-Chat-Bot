@@ -14,38 +14,38 @@ insurance against a tone-deaf message going to hundreds of people.
 
 TEMPLATES = {
     "Hindi": (
-        "Namaste {name} ji! 👋 Aapke {niche} wale posts Instagram par dekhe, "
+        "Namaste {name} ji! 👋 Aapke {niche} wale posts {platform} par dekhe, "
         "kaam bahut solid hai. Hum {brand} ke saath ek creator program chala rahe hain — "
         "aap jaise mistri/mason bhaiyon ke real site videos chahiye. {offer} "
         "Agar interested hain to reply kar dein, hum details bhej dete hain."
     ),
     "Gujarati": (
-        "Namaste {name} ji! 👋 Tamara {niche} na posts Instagram par joya, kaam khoob saras che. "
+        "Namaste {name} ji! 👋 Tamara {niche} na posts {platform} par joya, kaam khoob saras che. "
         "Ame {brand} sathe ek creator program chalavi rahiya chhiye — tamara jeva mistri/mason "
         "bhaiona real site video joie che. {offer} Interested ho to reply karo, ame details mokli dishu."
     ),
     "Marathi": (
-        "Namaskar {name} ji! 👋 Tumche {niche} chi posts Instagram var pahili, kaam kharach chaan aahe. "
+        "Namaskar {name} ji! 👋 Tumche {niche} chi posts {platform} var pahili, kaam kharach chaan aahe. "
         "Aamhi {brand} sobat ek creator program chalvat aahot — tumhi sarkhya mistri/mason bandhavanche "
         "khare site video havet. {offer} Interested asal tar reply kara, aamhi details pathavto."
     ),
     "Telugu": (
-        "Namaskaram {name} garu! 👋 Mee {niche} posts Instagram lo chusanu, pani chala bagunnadi. "
+        "Namaskaram {name} garu! 👋 Mee {niche} posts {platform} lo chusanu, pani chala bagunnadi. "
         "Memu {brand} tho కలిసి ఒక creator program chesthunnamu — mee lanti mistri/mason bandhuvula "
         "real site videos kavali. {offer} Interested unte reply cheyandi, details pampistham."
     ),
     "Odia": (
-        "Namaskar {name} ji! 👋 Apananka {niche} posts Instagram re dekhili, kaam khub bhala achhi. "
+        "Namaskar {name} ji! 👋 Apananka {niche} posts {platform} re dekhili, kaam khub bhala achhi. "
         "Amemane {brand} sathire ekta creator program chalauchhu — apananka bhali mistri/mason "
         "bhai manankara asali site video darkar. {offer} Interested hele reply karantu, amme details deba."
     ),
     "Assamese": (
-        "Namaskar {name} ji! 👋 Apunar {niche} r post Instagram-t dekhisilu, kaam bhal hoise. "
+        "Namaskar {name} ji! 👋 Apunar {niche} r post {platform}-t dekhisilu, kaam bhal hoise. "
         "Ami {brand} r sathe ekta creator program chalai asu — apunar dore mistri/mason bhai-eskolar "
         "asol site video lagе. {offer} Interested hole reply koribo, ami details pathai dim."
     ),
     "Bengali": (
-        "Namaskar {name} ji! 👋 Apnar {niche} er post Instagram-e dekhlam, kaj khub bhalo hoyeche. "
+        "Namaskar {name} ji! 👋 Apnar {niche} er post {platform}-e dekhlam, kaj khub bhalo hoyeche. "
         "Amra {brand} er sathe ekta creator program chalachhi — apnar moto mistri/mason bhaiyeder "
         "asol site video lagbe. {offer} Interested hole reply korun, amra details pathiye dibo."
     ),
@@ -71,7 +71,10 @@ NICHE_PHRASE = {
 DEFAULT_NICHE_PHRASE = "construction/mistri"
 
 
-def render_message(language, name, niche_key, brand, offer):
+def render_message(language, name, niche_key, brand, offer, platform="Instagram"):
+    """`platform` is the network the creator was found on, and it must match —
+    telling a YouTube creator you saw their posts "on Instagram" is an instant
+    tell that the message was mass-generated."""
     lang = language if language in TEMPLATES else DEFAULT_LANGUAGE
     niche = NICHE_PHRASE.get(niche_key, DEFAULT_NICHE_PHRASE)
     # name can arrive as a float (pandas reads an empty cell as NaN, which is
@@ -79,4 +82,6 @@ def render_message(language, name, niche_key, brand, offer):
     # nameless/odd row must never crash the whole import.
     name = name.strip() if isinstance(name, str) else ""
     first_name = name.split()[0] if name else "Bhai"
-    return TEMPLATES[lang].format(name=first_name, niche=niche, brand=brand, offer=offer)
+    return TEMPLATES[lang].format(
+        name=first_name, niche=niche, brand=brand, offer=offer, platform=platform
+    )

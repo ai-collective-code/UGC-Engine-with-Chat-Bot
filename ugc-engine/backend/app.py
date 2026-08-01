@@ -39,6 +39,7 @@ import phone_capture
 import message_variations
 import creator_verification
 import language_intelligence
+import youtube_client
 
 from flask import Flask, jsonify, request, send_from_directory, Response
 
@@ -894,6 +895,105 @@ def api_message_variations():
     except (ValueError, TypeError) as e:
         return jsonify({"error": str(e)}), 400
     return jsonify({"variations": variations})
+
+
+# --- youtube channel sourcing ----------------------------------------------
+# Unlike the Apify scrapes these are synchronous: channels.list answers in well
+# under a second, so there's no run to poll. Quota is the constraint instead of
+# time -- a lookup costs 1 unit against 10,000/day, a keyword search costs 100 --
+# so every response reports what it spent.
+
+def _youtube_guard(payload):
+    """Shared validation. Returns (client_id, cfg, error_response)."""
+    if not youtube_client.is_configured():
+        return None, None, (
+            jsonify({"error": "No YouTube API key. Set YOUTUBE_API_KEY (or reuse "
+                              "GOOGLE_MAPS_API_KEY) in .env, then restart the dashboard."}),
+            400,
+        )
+    client_id = payload.get("client_id")
+    client = local_db.get_client(client_id) if client_id else None
+    if not client:
+        return None, None, (jsonify({"error": "valid client_id is required"}), 400)
+    try:
+        cfg = _load_client_cfg(client)
+    except RuntimeError as e:
+        return None, None, (jsonify({"error": str(e)}), 500)
+    return client_id, cfg, None
+
+
+@app.route("/api/youtube/channels", methods=["POST"])
+def api_youtube_channels():
+    """Look up YouTube channels by URL, @handle, channel ID or legacy username.
+
+    Cheap (1 quota unit per 50 IDs), so this is the bulk path. Set
+    `import` to false to preview the channels without writing creators.
+    """
+    payload = request.get_json(silent=True) or {}
+    client_id, cfg, error = _youtube_guard(payload)
+    if error:
+        return error
+
+    refs = [str(t).strip() for t in (payload.get("targets") or []) if str(t).strip()]
+    if not refs:
+        return jsonify({"error": "Enter at least one channel URL, @handle or channel ID."}), 400
+    if len(refs) > 200:
+        return jsonify({"error": "Too many channels in one request — send at most 200."}), 400
+
+    try:
+        channels, report = youtube_client.fetch_channels(refs)
+    except youtube_client.YouTubeError as e:
+        return jsonify({"error": str(e)}), 502
+
+    result = {"channels": channels, **report}
+    if payload.get("import") is False:
+        return jsonify({**result, "imported": None})
+
+    try:
+        result["imported"] = outreach_pipeline.store_youtube_channels(cfg, client_id, channels)
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({**result, "error": f"Fetched {len(channels)} channels but the import failed: {e}"}), 502
+    return jsonify(result)
+
+
+@app.route("/api/youtube/search", methods=["POST"])
+def api_youtube_search():
+    """Discover channels you don't know yet, by keyword.
+
+    Costs 100 quota units per search (~100 searches/day on the free tier), so
+    this is deliberately a separate endpoint from the cheap lookup above and
+    defaults to preview-only -- pass `import: true` to write creators.
+    """
+    payload = request.get_json(silent=True) or {}
+    client_id, cfg, error = _youtube_guard(payload)
+    if error:
+        return error
+
+    query = str(payload.get("query") or "").strip()
+    if not query:
+        return jsonify({"error": "Enter a search term (e.g. 'tiles fitting mistri')."}), 400
+
+    try:
+        channels, report = youtube_client.search_channels(
+            query,
+            limit=payload.get("limit") or 10,
+            region_code=(payload.get("region_code") or "").strip() or None,
+            relevance_language=(payload.get("relevance_language") or "").strip() or None,
+        )
+    except youtube_client.YouTubeError as e:
+        return jsonify({"error": str(e)}), 502
+
+    result = {"channels": channels, "query": query, **report}
+    if not payload.get("import"):
+        return jsonify({**result, "imported": None})
+
+    try:
+        result["imported"] = outreach_pipeline.store_youtube_channels(cfg, client_id, channels)
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({**result, "error": f"Found {len(channels)} channels but the import failed: {e}"}), 502
+    return jsonify(result)
 
 
 # --- profile analyzer ------------------------------------------------------

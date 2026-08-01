@@ -222,6 +222,59 @@
           <div class="scrape-status" id="hashtag-status"></div>
         </div>
 
+        <div class="panel scrape-panel">
+          <div class="upload-intro-row">
+            <div class="panel-head" style="margin:0">
+              <h2>▶️ YouTube Channels <span class="scrape-live-tag">live · YouTube API</span></h2>
+              <span class="panel-hint">Paste channel URLs, @handles or channel IDs (one per line). Pulls the channel description, subscribers, video count and keywords — and because creators put business contact details in their description, any phone found is routed to WhatsApp and any email saved to the creator's notes. Free: 1 of 10,000 daily quota units per 50 channels.</span>
+            </div>
+            <label class="upload-client-label">
+              Client
+              <select id="yt-client-select" required></select>
+            </label>
+          </div>
+          <div class="scrape-row">
+            <textarea id="yt-targets" class="scrape-targets" rows="4" placeholder="https://www.youtube.com/@TilesMistri&#10;@gurpreet_thekedaar&#10;UCX6OQ3DkcsbYNE6H8uQQuVA"></textarea>
+            <div class="scrape-controls">
+              <label class="scrape-limit-label" style="flex-direction:row; align-items:center; gap:6px;">
+                <input type="checkbox" id="yt-import" checked>
+                Save as creators
+              </label>
+              <button class="btn btn-primary" id="yt-btn">▶ Fetch channels</button>
+            </div>
+          </div>
+          <div class="scrape-status" id="yt-status"></div>
+          <div id="yt-results" style="display:none; margin-top:14px;"></div>
+        </div>
+
+        <div class="panel scrape-panel">
+          <div class="upload-intro-row">
+            <div class="panel-head" style="margin:0">
+              <h2>🔎 Find YouTube Creators <span class="scrape-live-tag">live · YouTube API</span></h2>
+              <span class="panel-hint">Search for creators you don't know yet. Costs 100 of the 10,000 daily quota units per search (~100 searches/day), so results preview by default — tick "Save as creators" only when the list looks right.</span>
+            </div>
+            <label class="upload-client-label">
+              Client
+              <select id="yt-search-client-select" required></select>
+            </label>
+          </div>
+          <div class="scrape-row">
+            <textarea id="yt-query" class="scrape-targets" rows="2" placeholder="tiles fitting mistri"></textarea>
+            <div class="scrape-controls">
+              <label class="scrape-limit-label">Max channels
+                <input type="number" id="yt-search-limit" value="10" min="1" max="50">
+              </label>
+              <label class="scrape-limit-label" style="flex-direction:row; align-items:center; gap:6px;">
+                <input type="checkbox" id="yt-search-import">
+                Save as creators
+              </label>
+              <button class="btn btn-primary" id="yt-search-btn">🔎 Search</button>
+            </div>
+          </div>
+          <div class="scrape-status" id="yt-search-status"></div>
+          <div id="yt-search-results" style="display:none; margin-top:14px;"></div>
+        </div>
+
         <div class="panel">
           <div class="panel-head" style="margin-bottom:12px; display:flex; align-items:center; justify-content:space-between; gap:12px;">
             <div>

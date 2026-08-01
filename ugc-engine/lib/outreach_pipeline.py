@@ -234,14 +234,32 @@ def load_flat(input_path, cfg):
     return pd.DataFrame(enriched)
 
 
-def build_messages(df, cfg):
+# Display names for the platform slug used throughout the pipeline. The message
+# says the network out loud, so casing matters to a reader: "YouTube", not "Youtube".
+PLATFORM_LABELS = {
+    "instagram": "Instagram",
+    "facebook": "Facebook",
+    "youtube": "YouTube",
+    "linkedin": "LinkedIn",
+}
+
+
+def platform_label(platform):
+    return PLATFORM_LABELS.get(str(platform or "").strip().lower(), "Instagram")
+
+
+def build_messages(df, cfg, platform="Instagram"):
+    """`platform` names the network in the message ("...posts YouTube par dekhe"),
+    so it must match where the creator was actually sourced from."""
     brand = cfg["brand_display_name"]
     offer = cfg["offer_line"]["value"]
     if df.empty:
         df["Personalized Message"] = []
         return df
     df["Personalized Message"] = df.apply(
-        lambda r: render_message(r["Language"], r["Full Name"], r["Niche"], brand, offer),
+        lambda r: render_message(
+            r["Language"], r["Full Name"], r["Niche"], brand, offer, platform
+        ),
         axis=1,
     )
     return df
@@ -291,7 +309,9 @@ def process_upload(input_path, cfg, platform):
         df = load_and_merge(input_path, cfg)
     else:
         df = load_flat(input_path, cfg)
-    df = build_messages(df, cfg)
+    # The platform was already known here but wasn't reaching the message, so a
+    # YouTube or LinkedIn upload told the creator we saw their posts on Instagram.
+    df = build_messages(df, cfg, platform=platform_label(platform))
     if df.empty:
         return df
     df["Phone"] = df["Phone"].fillna("").astype(str)
@@ -406,6 +426,11 @@ def rows_for_db(df, platform):
             "profile_type": ai_types.get(username) or classify_profile_type(full_name, username, caption),
             "whatsapp_link": str(r.get("WhatsApp Link") or "") if phone else "",
             "status": "Not Sent",
+            # Carries anything worth keeping that has no column of its own --
+            # currently the business email off a YouTube channel description.
+            # insert_creators leaves notes alone on conflict, so a manual note is
+            # never clobbered by a re-import.
+            "notes": str(r.get("Notes") or ""),
         })
     return rows
 
@@ -477,11 +502,29 @@ def store_dealer_upload(client_id, input_path):
 
 # --- Apify live-scrape path (Instagram Reel Scraper) -----------------------
 
+def _collapse_digit_separators(text):
+    """Drop a single space/dash/dot sitting BETWEEN two digits.
+
+    Deliberately narrow: it joins "98765 43210" into one number without gluing
+    two separate numbers together, because the lookarounds require a digit on
+    both sides of the separator.
+    """
+    return re.sub(r"(?<=\d)[\s.–—-](?=\d)", "", text)
+
+
 def _phone_from(text, phone_re):
-    for m in phone_re.findall(text or ""):
-        clean = re.sub(r"[^\d]", "", m)[-10:]
-        if clean:
-            return clean
+    """First plausible mobile number in free text, or "".
+
+    Tried twice: on the text as written, then on a copy with separators inside
+    digit runs collapsed. The client phone_regex wants ten contiguous digits, but
+    creators overwhelmingly write "98765 43210" or "98765-43210" — and a number we
+    fail to read is a creator who never reaches the WhatsApp queue at all.
+    """
+    for candidate in (text or "", _collapse_digit_separators(text or "")):
+        for m in phone_re.findall(candidate):
+            clean = re.sub(r"[^\d]", "", m)[-10:]
+            if len(clean) == 10:
+                return clean
     return ""
 
 
@@ -542,6 +585,82 @@ def apify_reels_to_df(items, cfg):
         })
 
     return pd.DataFrame(enriched)
+
+
+def youtube_channels_to_df(channels, cfg):
+    """Turn YouTube channels (from lib/youtube_client) into creator rows.
+
+    The channel DESCRIPTION is the reason this is worth doing: creators there
+    routinely publish a business email or phone for enquiries, which is the exact
+    contact detail the WhatsApp queue is built around. So the phone comes from the
+    description using the client's own phone_regex, and any email is kept in Notes
+    (no column of its own) rather than thrown away.
+
+    Location enrichment is weaker than Instagram's: YouTube exposes only a
+    two-letter country, never a city, so there is no geotag to map to a state and
+    most rows will fall back to the campaign's default language.
+    """
+    phone_re = re.compile(cfg["phone_regex"])
+    default_lang = cfg.get("default_language", "Hindi")
+
+    enriched = []
+    for ch in channels:
+        description = str(ch.get("description") or "")
+        # Handle is the human-facing identity; fall back to the opaque channel id
+        # so the (client, username, channel) upsert key is never blank.
+        username = str(ch.get("handle") or ch.get("channel_id") or "").strip()
+        if not username:
+            continue
+
+        country = str(ch.get("country") or "").strip()
+        language, matched_state, confidence = (
+            resolve_language(country) if country else (None, None, "none")
+        )
+        if not language:
+            language = default_lang
+
+        keywords = ch.get("keywords") or []
+        emails = ch.get("emails") or []
+
+        enriched.append({
+            "Full Name": str(ch.get("title") or username),
+            "Username": username,
+            "Profile Link": str(ch.get("url") or ""),
+            "Location (raw)": country,
+            "Matched State": matched_state or "",
+            "Language": language,
+            "Language Confidence": confidence,
+            "Niche": str(keywords[0]) if keywords else "",
+            "Phone": _phone_from(description, phone_re),
+            # Keep far more than the Instagram path's 120 chars: here the
+            # description IS the intelligence, not an incidental caption.
+            "Caption Sample": description[:600],
+            "Notes": ("email: " + ", ".join(emails[:3])) if emails else "",
+        })
+
+    return pd.DataFrame(enriched)
+
+
+def store_youtube_channels(cfg, client_id, channels):
+    """Map YouTube channels -> creators and insert them, tagged source youtube.
+
+    Mirrors store_apify_items so both sources land in one queue with the same
+    enrichment and the same generated outreach message.
+    """
+    df = youtube_channels_to_df(channels, cfg)
+    df = build_messages(df, cfg, platform="YouTube")
+    if not df.empty:
+        df["Phone"] = df["Phone"].fillna("").astype(str)
+        df["WhatsApp Link"] = df.apply(
+            lambda r: wa_link(r["Phone"], r["Personalized Message"]), axis=1
+        )
+    rows = rows_for_db(df, "youtube")
+    local_db.insert_creators(client_id, rows)
+    return {
+        "total": len(rows),
+        "whatsapp_ready": sum(1 for r in rows if r["phone"]),
+        "with_email": sum(1 for r in rows if r["notes"]),
+    }
 
 
 def store_apify_items(cfg, client_id, items, platform="instagram"):

@@ -1322,7 +1322,11 @@ async function fetchYtChannels() {
     } else {
       setYtStatus("yt-status", "");
       renderYtChannels("yt-results", res);
-      if (res.imported) renderYtStats();
+      if (res.imported) {
+        renderYtStats();
+        loadCreators();
+        refreshWhatsappBadge();
+      }
     }
   } catch (err) {
     setYtStatus("yt-status", err.message, "error");
@@ -1359,7 +1363,11 @@ async function searchYtChannels() {
     } else {
       setYtStatus("yt-search-status", res.channels?.length ? "" : "No channels matched that search.");
       renderYtChannels("yt-search-results", res);
-      if (res.imported) renderYtStats();
+      if (res.imported) {
+        renderYtStats();
+        loadCreators();
+        refreshWhatsappBadge();
+      }
     }
   } catch (err) {
     setYtStatus("yt-search-status", err.message, "error");

@@ -538,6 +538,7 @@ def api_creators_export():
         ("username", "Username"),
         ("profile_link", "Profile Link"),
         ("phone", "Phone"),
+        ("email", "Email"),
         ("whatsapp_link", "WhatsApp Link"),
         ("location_raw", "Location"),
         ("language", "Language"),

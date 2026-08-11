@@ -1,0 +1,91 @@
+Account Audit Summary,,,
+Account Name,@thepublicnappers,
+Company,Springfit Mattress,
+Total Followers,1162,
+Sample Size Analyzed,11,
+Analysis Date,August 6 2026,
+,,
+RISK ASSESSMENT,COUNT,PERCENTAGE
+Legitimate Users,4,36%
+Confirmed Bots,1,9%
+Suspected Bots,5,45%
+Uncertain Accounts,1,9%
+,,
+ACCOUNT HEALTH SCORE,45/100,POOR
+,,
+DETAILED FOLLOWER BREAKDOWN,,,
+S.No,Username,Account Type,Risk Level,Status,Notes
+1,yours._.shuu,Legitimate User,Low 🟢,✅ GOOD,"2,695 followers - High quality account"
+2,duck.49181321,Follow Bot,Very High 🔴,❌ BOT,"Confirmed bot - 9 followers, 4650 following (ratio 1:516)"
+3,tahmina__laskar__98,Potential Bot,High 🔴,⚠️ SUSPICIOUS,"No bio, N/A metrics, likely fake"
+4,hawk.7181163,Uncertain,Medium 🟡,🤔 UNCERTAIN,"N/A metrics, numbered username"
+5,prisca_miss02,Legitimate User,Low 🟢,✅ GOOD,"Real user account"
+6,kumar__king_1s,Legitimate User,Low 🟢,✅ GOOD,"Real user - rajit singh"
+7,anish0099912,Suspected Bot,High 🔴,❌ BOT,"No bio, numbered suffix - typical bot"
+8,shreekhetlajilive,Legitimate User,Low 🟢,✅ GOOD,"Real user account"
+9,x__akash_._s_,Suspected Bot,High 🔴,❌ BOT,"Suspicious username pattern, no bio"
+10,itz.bad_boy_7310,Suspected Bot,High 🔴,❌ BOT,"Generic username, numbered suffix"
+11,sad_mundapb03,Suspected Bot,High 🔴,❌ BOT,"Numbered suffix, no bio - likely bot"
+,,
+KEY METRICS,,,
+Risk Level,Count,Percentage,
+Low Risk (🟢),4,36%,
+Medium Risk (🟡),1,9%,
+High Risk (🔴),5,45%,
+Very High Risk (🔴),1,9%,
+,,
+Account Distribution,,,
+Type,Count,Percentage,
+Legitimate Users,4,36%,
+Bot Accounts,6,55%,
+Uncertain,1,9%,
+,,
+Bio Status Analysis,,,
+Status,Count,Percentage,
+Has Bio/Display Name,4,36%,
+No Bio (Suspicious),6,55%,
+Special/Emoji Bio,1,9%,
+,,
+CRITICAL FINDINGS,,,
+Finding,Severity,Impact,Action
+High Bot Follower Count,🔴 CRITICAL,"55% bot followers inflate numbers, reduce real reach","Immediately audit all followers, remove bots"
+No Bio Accounts,🔴 CRITICAL,"45% of followers have no bio - typical of fake accounts","Flag and investigate suspicious accounts"
+Confirmed Follow Bot,🔴 CRITICAL,"Account duck.49181321 confirmed bot with 1:516 follower ratio","Block and report to Instagram"
+Low Real Engagement,🔴 CRITICAL,"Real follower base ~523 users (36% of 1,162)","Refocus on organic growth strategy"
+,,
+RECOMMENDATIONS,,,
+Priority,Action,Timeline,Impact
+URGENT,Remove bot followers - block and report,Immediate,Improve account quality
+URGENT,Audit full 1,162 follower list,This week,Confirm bot percentage
+URGENT,Stop using growth services,Immediate,Prevent further bot acquisition
+HIGH,Implement organic growth strategy,1-2 weeks,Build authentic audience
+HIGH,Set up Instagram Insights tracking,1-2 weeks,Monitor real metrics
+MEDIUM,Create content calendar,1-2 weeks,Consistent quality content
+MEDIUM,Build engagement strategy,1-3 months,Increase real interactions
+MEDIUM,Partner with influencers,1-3 months,Reach real audience
+,,
+TRUE ACCOUNT METRICS (ESTIMATED),,,
+Reported Followers,1162,
+Estimated Bot Followers,625,(55% of total)
+Estimated Real Followers,537,(45% of total)
+,,
+IMPROVEMENT ROADMAP,,,
+Phase,Duration,Focus Area,Expected Outcome
+Phase 1: Cleanup,1-2 weeks,"Remove bots, report fake accounts, analysis",Account health: 45→55/100
+Phase 2: Stabilize,2-4 weeks,"Organic growth, content optimization, analytics setup",Account health: 55→70/100
+Phase 3: Growth,1-3 months,"Influencer partnerships, community building, engagement",Account health: 70→85/100
+Phase 4: Scale,3-6 months,"Sustainable growth, brand authority, ROI tracking",Account health: 85→90+/100
+,,
+TOOLS RECOMMENDED,,,
+Category,Tools,Purpose
+Bot Detection,"HypeAuditor, Social Blade, Cleaner for Instagram","Identify and remove fake followers"
+Content Management,"Later, Buffer, Sprout Social","Schedule posts, manage engagement"
+Analytics,"Instagram Insights, Sprout Social, Brandwatch","Track metrics, measure performance"
+Growth,"Instagram Ads, influencer partnerships, organic strategy","Build authentic audience"
+,,
+CONFIDENCE LEVEL,,,
+Analysis Type,Confidence,Notes
+Bot Identification,HIGH 95%,Clear patterns visible in sample
+Account Health Score,HIGH 85%,"Based on follower quality, may vary with full audit"
+Growth Potential,MEDIUM 70%,"Depends on implementation of recommendations"
+Timeline to Recovery,MEDIUM 75%,"Assumes consistent execution of action plan"

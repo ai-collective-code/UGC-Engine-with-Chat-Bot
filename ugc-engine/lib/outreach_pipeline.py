@@ -18,6 +18,17 @@ from profile_analyzer import classify_profiles_ai
 import local_db
 
 
+# Email extraction: find the first valid email in text
+_EMAIL_REGEX = re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
+
+def extract_email(text):
+    """Return the first email address found in text, or empty string."""
+    if not text:
+        return ""
+    match = _EMAIL_REGEX.search(str(text))
+    return match.group(0) if match else ""
+
+
 # --- Profile type: individual mistri vs. business/shop account -------------
 # Primary classifier is AI (classify_profiles_ai, batched -- one Gemini call
 # per upload/scrape, not per creator). This keyword list is the fallback for
@@ -419,6 +430,7 @@ def rows_for_db(df, platform):
             "language_confidence": str(r.get("Language Confidence") or ""),
             "niche": str(r.get("Niche") or ""),
             "phone": phone,
+            "email": str(r.get("Email") or ""),
             "caption_sample": caption,
             "personalized_message": str(r.get("Personalized Message") or ""),
             "channel": platform,
@@ -426,10 +438,6 @@ def rows_for_db(df, platform):
             "profile_type": ai_types.get(username) or classify_profile_type(full_name, username, caption),
             "whatsapp_link": str(r.get("WhatsApp Link") or "") if phone else "",
             "status": "Not Sent",
-            # Carries anything worth keeping that has no column of its own --
-            # currently the business email off a YouTube channel description.
-            # insert_creators leaves notes alone on conflict, so a manual note is
-            # never clobbered by a re-import.
             "notes": str(r.get("Notes") or ""),
         })
     return rows
@@ -656,9 +664,8 @@ def apify_facebook_to_df(items, cfg):
         if not phone and about:
             phone = _phone_from(about, phone_re)
 
-        # Business email is the other contact detail these pages expose; it has no
-        # column of its own, so it rides in Notes the same way YouTube's does.
-        email = str(it.get("email") or "").strip()
+        # Business email is extracted from the email field
+        email = extract_email(it.get("email") or "")
 
         # These pages carry a full street address rather than a city field, and it
         # is the only regional signal on offer -- without it every Kolkata shop
@@ -683,8 +690,9 @@ def apify_facebook_to_df(items, cfg):
             "Language Confidence": confidence,
             "Niche": niche,
             "Phone": phone,
+            "Email": email,
             "Caption Sample": about[:120],
-            "Notes": f"Email: {email}" if email else "",
+            "Notes": "",
         })
 
     return pd.DataFrame(enriched)
@@ -747,6 +755,7 @@ def youtube_channels_to_df(channels, cfg):
 
         keywords = ch.get("keywords") or []
         emails = ch.get("emails") or []
+        email = extract_email(" ".join(emails)) if emails else extract_email(description)
 
         enriched.append({
             "Full Name": str(ch.get("title") or username),
@@ -758,10 +767,11 @@ def youtube_channels_to_df(channels, cfg):
             "Language Confidence": confidence,
             "Niche": str(keywords[0]) if keywords else "",
             "Phone": _phone_from(description, phone_re),
+            "Email": email,
             # Keep far more than the Instagram path's 120 chars: here the
             # description IS the intelligence, not an incidental caption.
             "Caption Sample": description[:600],
-            "Notes": ("email: " + ", ".join(emails[:3])) if emails else "",
+            "Notes": "",
         })
 
     return pd.DataFrame(enriched)

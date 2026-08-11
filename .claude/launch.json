@@ -15,6 +15,21 @@
       "port": 3000,
       "autoPort": true,
       "cwd": "Insta-agent"
+    },
+    {
+      "name": "Content Engine",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "port": 3000,
+      "autoPort": true,
+      "cwd": "claude-social-automation/web"
+    },
+    {
+      "name": "Social Automation 12ka4",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": ["/c", ".claude\\run-social-automation-12ka4.cmd"],
+      "port": 3000,
+      "autoPort": true
     }
   ]
 }

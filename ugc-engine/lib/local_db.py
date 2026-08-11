@@ -69,6 +69,7 @@ CREATE TABLE IF NOT EXISTS creators (
     language_confidence TEXT,
     niche TEXT,
     phone TEXT,
+    email TEXT,
     caption_sample TEXT,
     personalized_message TEXT,
     channel TEXT,
@@ -289,6 +290,13 @@ def _migrate(conn):
     removed = conn.execute("DELETE FROM creators WHERE channel='whatsapp'").rowcount
     if removed:
         print(f"[local_db] migration: removed {removed} legacy derived whatsapp rows")
+
+    # Add email column if it doesn't exist
+    try:
+        conn.execute("ALTER TABLE creators ADD COLUMN email TEXT")
+        print("[local_db] migration: added email column to creators")
+    except Exception:
+        pass  # column already exists
 
     # Backfill source_platform from channel wherever it's still blank.
     conn.execute(

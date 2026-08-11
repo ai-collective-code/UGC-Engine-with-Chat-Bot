@@ -1,0 +1,29 @@
+S.No,Username,Followers,Following,Following-to-Follower Ratio,Has Bio,Verdict,Confidence,CSV Said,Correction
+1,yours._.shuu,2695,299,0.11,Yes - detailed,REAL,High,Legitimate User,Agrees
+2,duck.49181321,13,4636,357,No,BOT,High,Follow Bot (Confirmed),Agrees
+3,tahmina__laskar__98,15,4431,295,No,BOT,High,Potential Bot,UPGRADED - now proven
+4,hawk.7181163,3,2205,735,No - 0 posts,BOT,High,Uncertain,UPGRADED - now proven
+5,prisca_miss02,177,4217,23.8,Minimal,BOT,Medium-High,Legitimate User,WRONG IN CSV - is mass-follower
+6,kumar__king_1s,743,3389,4.6,Yes - name + highlights,REAL,Medium,Legitimate User,Agrees
+7,anish0099912,3,2918,973,No,BOT,High,Suspected Bot,Agrees - now proven
+8,shreekhetlajilive,244,592,2.4,Yes - devotional + YouTube link,REAL,High,Legitimate User,Agrees
+9,x__akash_._s_,16,6860,429,Yes - but private,BOT,High,Suspected Bot,Agrees - now proven
+10,itz.bad_boy_7310,116,1602,13.8,No,LIKELY BOT,Medium,Suspected Bot,Agrees - weakest case
+11,sad_mundapb03,15,4920,328,No,BOT,High,Suspected Bot,Agrees - now proven
+,,,,,,,,,
+TALLY,,,,,,,,,
+Category,Count,Percent of sample,,,,,,,
+Real,3,27%,,,,,,,
+Bot or mass-follower,8,73%,,,,,,,
+,,,,,,,,,
+CLASSIFICATION RULE USED,,,,,,,,,
+Ratio (following divided by followers),Verdict,,,,,,,,
+Under 3,REAL,,,,,,,,
+3 to 10,Gray zone - decided by bio/posts/highlights,,,,,,,,
+Over 10 with no bio,BOT,,,,,,,,
+Over 100,BOT - definitive,,,,,,,,
+,,,,,,,,,
+IMPORTANT LIMITS,,,,,,,,,
+This sample is 11 of 1162 followers. It is NOT a random sample and CANNOT be extrapolated to the full account.,,,,,,,,,
+Post counts were not readable while logged out. Ratio and bio were the usable signals.,,,,,,,,,
+duck.49181321 changed from 9 followers / 4650 following in your CSV to 13 / 4636 live - the account is actively churning follows.,,,,,,,,,

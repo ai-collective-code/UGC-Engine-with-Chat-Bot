@@ -51,6 +51,10 @@
           <span class="nav-icon">🟢</span> WhatsApp
           <span id="whatsapp-badge" class="nav-badge nav-badge-green" hidden>0</span>
         </button>
+        <button class="nav-item" data-section="email" id="nav-email">
+          <span class="nav-icon">📧</span> Email Leads
+          <span id="email-badge" class="nav-badge nav-badge-violet" hidden>0</span>
+        </button>
         <button class="nav-item" data-section="conversations" id="nav-conversations">
           <span class="nav-icon">💬</span> Conversations
         </button>
@@ -693,6 +697,50 @@
             <tbody></tbody>
           </table>
           <div class="empty-state" id="whatsapp-empty" hidden>No WhatsApp numbers yet. Upload a platform export with contact numbers and they'll appear here automatically.</div>
+        </div>
+      </section>
+
+      <!-- ═══ EMAIL LEADS ═══ -->
+      <section id="section-email" class="section" hidden>
+        <div class="panel wa-intro">
+          <div class="panel-head" style="margin:0; display:flex; align-items:flex-start; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+            <div>
+              <h2>Email leads</h2>
+              <span class="panel-hint">Every creator with a discovered email address — past and future imports from all source platforms. Click Mail to open a pre-addressed email, or export the list for a campaign.</span>
+            </div>
+            <button class="btn btn-small" id="email-export-btn">⬇ Export to Excel</button>
+          </div>
+        </div>
+        <div class="toolbar">
+          <select id="email-platform-filter" aria-label="Filter by source platform">
+            <option value="">All sources</option>
+            <option value="instagram">Instagram</option>
+            <option value="facebook">Facebook</option>
+            <option value="youtube">YouTube</option>
+            <option value="linkedin">LinkedIn</option>
+          </select>
+          <select id="email-status-filter" aria-label="Filter by status">
+            <option value="">All statuses</option>
+            <option>Not Sent</option>
+            <option>Sent</option>
+            <option>Replied</option>
+            <option>Converted</option>
+            <option>Not Interested</option>
+          </select>
+          <input type="text" id="email-search" class="toolbar-search" placeholder="Search name, email, niche…" aria-label="Search email leads">
+          <span class="toolbar-count" id="email-count"></span>
+        </div>
+        <div class="table-wrap">
+          <table id="email-table">
+            <thead>
+              <tr>
+                <th>Creator</th><th>Source</th><th>Language</th>
+                <th>Niche</th><th>Email</th><th>Phone</th><th>Status</th><th>Mail</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+          <div class="empty-state" id="email-empty" hidden>No emails captured yet. Scrape YouTube channels or Facebook pages — any business email found is saved here automatically.</div>
         </div>
       </section>
 

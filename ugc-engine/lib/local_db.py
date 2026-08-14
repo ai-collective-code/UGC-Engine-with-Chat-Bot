@@ -298,6 +298,24 @@ def _migrate(conn):
     # startup and made deploys fail while the old version kept running.
     conn.execute("ALTER TABLE creators ADD COLUMN IF NOT EXISTS email TEXT")
 
+    # Backfill emails for creators imported before the column existed: old
+    # YouTube imports kept "email: a@b.com" in notes, Facebook "Email: a@b.com",
+    # and YouTube channel descriptions (caption_sample) often carry one too.
+    # Idempotent: only rows still missing an email are touched, and a row whose
+    # text has an @ but no valid address gets '' so it isn't rescanned forever.
+    # (Regex avoids % and ? so it can't collide with placeholder translation.)
+    backfilled = conn.execute(
+        "UPDATE creators SET email = COALESCE("
+        " substring(notes from '[A-Za-z0-9._+-]+@[A-Za-z0-9.-]+[.][A-Za-z]{2,}'),"
+        " substring(caption_sample from '[A-Za-z0-9._+-]+@[A-Za-z0-9.-]+[.][A-Za-z]{2,}'),"
+        " '')"
+        " WHERE (email IS NULL OR email = '')"
+        " AND (position('@' in coalesce(notes, '')) > 0"
+        "      OR position('@' in coalesce(caption_sample, '')) > 0)"
+    ).rowcount
+    if backfilled:
+        print(f"[local_db] migration: backfilled email for {backfilled} creators")
+
     # Backfill source_platform from channel wherever it's still blank.
     conn.execute(
         "UPDATE creators SET source_platform = channel "
@@ -419,7 +437,7 @@ def upsert_whatsapp_contact(client_id, username, full_name, phone, whatsapp_link
 
 
 def list_creators(client_id=None, status=None, channel=None,
-                  source_platform=None, whatsapp_ready=None):
+                  source_platform=None, whatsapp_ready=None, email_ready=None):
     q = "SELECT * FROM creators WHERE 1=1"
     params = []
     if client_id:
@@ -436,6 +454,8 @@ def list_creators(client_id=None, status=None, channel=None,
         params.append(source_platform)
     if whatsapp_ready:
         q += " AND phone IS NOT NULL AND phone != ''"
+    if email_ready:
+        q += " AND email IS NOT NULL AND email != ''"
     q += " ORDER BY id DESC"
     with get_conn() as conn:
         rows = conn.execute(q, params).fetchall()
@@ -449,6 +469,17 @@ def list_whatsapp_ready(client_id=None, source_platform=None, status=None):
     return list_creators(
         client_id=client_id, source_platform=source_platform,
         status=status, whatsapp_ready=True,
+    )
+
+
+def list_email_ready(client_id=None, source_platform=None, status=None):
+    """The email funnel: every creator that has an email address, mirroring
+    list_whatsapp_ready. Past imports are covered too -- _migrate backfills
+    the email column from notes/caption_sample where one was captured before
+    the column existed."""
+    return list_creators(
+        client_id=client_id, source_platform=source_platform,
+        status=status, email_ready=True,
     )
 
 

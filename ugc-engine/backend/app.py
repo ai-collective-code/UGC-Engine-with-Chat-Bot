@@ -461,6 +461,17 @@ def api_whatsapp_ready():
     ))
 
 
+@app.route("/api/email-ready", methods=["GET"])
+def api_email_ready():
+    """The email funnel: every creator with a captured email address, past
+    and future imports alike (old rows are backfilled at startup)."""
+    return jsonify(local_db.list_email_ready(
+        client_id=request.args.get("client_id", type=int),
+        source_platform=request.args.get("source_platform"),
+        status=request.args.get("status"),
+    ))
+
+
 @app.route("/api/platform-breakdown", methods=["GET"])
 def api_platform_breakdown():
     return jsonify(local_db.platform_breakdown(client_id=request.args.get("client_id", type=int)))
@@ -531,6 +542,7 @@ def api_creators_export():
         status=request.args.get("status"),
         channel=request.args.get("channel"),
         source_platform=request.args.get("source_platform"),
+        email_ready=request.args.get("email_ready") == "1",
     )
 
     columns = [

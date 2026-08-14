@@ -188,7 +188,7 @@ function switchSection(section) {
   const titles = {
     overview: "Overview", upload: "Upload Data", scrape: "Instagram Scraper", fbscrape: "Facebook Scraper", ytscrape: "YouTube Scraper", analyzer: "Profile Analyzer",
     verify: "Creator Verification", langlab: "Language Lab", translator: "Translator",
-    whatsapp: "WhatsApp Contacts", creators: "Creators", conversations: "Conversations",
+    whatsapp: "WhatsApp Contacts", email: "Email Leads", creators: "Creators", conversations: "Conversations",
     spinner: "Message Variations",
     ops: "Ops Pipeline", dealers: "Dealers", actions: "Needs Action", clients: "Clients",
     shopfinder: "Shop Finder", shops: "Shop Verify",
@@ -208,6 +208,7 @@ function loadSection(section) {
   if (section === "langlab") return loadLangLab();
   if (section === "translator") return loadTranslator();
   if (section === "whatsapp") return loadWhatsapp();
+  if (section === "email") return loadEmail();
   if (section === "creators") return loadCreators();
   if (section === "ops") return loadOpsPipeline();
   if (section === "dealers") return loadDealers();
@@ -1326,6 +1327,7 @@ async function fetchYtChannels() {
         renderYtStats();
         loadCreators();
         refreshWhatsappBadge();
+        refreshEmailBadge();
       }
     }
   } catch (err) {
@@ -1371,6 +1373,7 @@ async function searchYtChannels() {
         renderYtStats();
         loadCreators();
         refreshWhatsappBadge();
+        refreshEmailBadge();
       }
     }
   } catch (err) {
@@ -1812,6 +1815,80 @@ async function refreshWhatsappBadge() {
   if (state.clientId) params.set("client_id", state.clientId);
   const rows = await api(`/api/whatsapp-ready?${params.toString()}`).catch(() => []);
   const badgeEl = document.getElementById("whatsapp-badge");
+  badgeEl.hidden = rows.length === 0;
+  badgeEl.textContent = rows.length;
+}
+
+// --- Email leads dashboard ──────────────────────────────────────────────────
+
+let emailRows = [];
+
+async function loadEmail() {
+  const params = new URLSearchParams();
+  if (state.clientId) params.set("client_id", state.clientId);
+  const platform = document.getElementById("email-platform-filter").value;
+  const status = document.getElementById("email-status-filter").value;
+  if (platform) params.set("source_platform", platform);
+  if (status) params.set("status", status);
+
+  emailRows = await api(`/api/email-ready?${params.toString()}`).catch(() => []);
+  renderEmail();
+}
+
+function renderEmail() {
+  const q = (document.getElementById("email-search").value || "").toLowerCase();
+  const rows = emailRows.filter((r) =>
+    !q || `${r.full_name} ${r.username} ${r.email} ${r.niche}`.toLowerCase().includes(q)
+  );
+
+  document.getElementById("email-count").textContent = `${rows.length} lead${rows.length === 1 ? "" : "s"}`;
+  document.getElementById("email-empty").hidden = rows.length > 0;
+
+  document.querySelector("#email-table tbody").innerHTML = rows.map((r) => `
+    <tr>
+      <td>
+        <div style="font-weight:700">${escapeHtml(r.full_name || "Unknown")} ${profileTypeTag(r)}</div>
+        <div style="font-size:11.5px;color:var(--text-muted)">@${escapeHtml(r.username || "")}</div>
+      </td>
+      <td>${badge(channelLabel(r.source_platform || r.channel), platformBadgeClass(r.source_platform || r.channel))}</td>
+      <td class="muted">${escapeHtml(r.language || "—")}</td>
+      <td class="muted">${escapeHtml(r.niche || "—")}</td>
+      <td><a href="mailto:${escapeHtml(r.email || "")}" style="color:var(--accent)">${escapeHtml(r.email || "—")}</a></td>
+      <td class="muted" style="font-variant-numeric:tabular-nums">${escapeHtml(r.phone || "—")}</td>
+      <td>
+        <span class="badge ${STATUS_BADGE_CLASS[r.status] || "badge-neutral"}">
+          <span class="badge-dot"></span>
+          <select class="status-select" data-id="${r.id}" aria-label="Status for ${escapeHtml(r.username || r.full_name || "creator")}">
+            ${STATUS_OPTIONS.map((s) => `<option value="${s}" ${s === r.status ? "selected" : ""}>${s}</option>`).join("")}
+          </select>
+        </span>
+      </td>
+      <td><a class="wa-btn" href="mailto:${escapeHtml(r.email || "")}">📧 Mail</a></td>
+    </tr>
+  `).join("");
+
+  document.querySelectorAll("#email-table .status-select").forEach((sel) => {
+    sel.addEventListener("change", async () => {
+      try {
+        await api(`/api/creators/${sel.dataset.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ status: sel.value }),
+        });
+        showToast(`Status updated to "${sel.value}"`, "success");
+      } catch (err) {
+        showToast(err.message || "Request failed", "error");
+      }
+      loadEmail();
+    });
+  });
+}
+
+async function refreshEmailBadge() {
+  const params = new URLSearchParams();
+  if (state.clientId) params.set("client_id", state.clientId);
+  const rows = await api(`/api/email-ready?${params.toString()}`).catch(() => []);
+  const badgeEl = document.getElementById("email-badge");
+  if (!badgeEl) return;
   badgeEl.hidden = rows.length === 0;
   badgeEl.textContent = rows.length;
 }
@@ -2911,6 +2988,7 @@ function initFilters() {
   document.getElementById("client-filter").addEventListener("change", (e) => {
     state.clientId = e.target.value;
     refreshWhatsappBadge();
+    refreshEmailBadge();
     loadSection(state.section);
   });
   document.getElementById("creator-status-filter").addEventListener("change", loadCreators);
@@ -2919,6 +2997,14 @@ function initFilters() {
   document.getElementById("wa-platform-filter").addEventListener("change", loadWhatsapp);
   document.getElementById("wa-status-filter").addEventListener("change", loadWhatsapp);
   document.getElementById("wa-search").addEventListener("input", debounce(renderWhatsapp, 200));
+  document.getElementById("email-platform-filter").addEventListener("change", loadEmail);
+  document.getElementById("email-status-filter").addEventListener("change", loadEmail);
+  document.getElementById("email-search").addEventListener("input", debounce(renderEmail, 200));
+  document.getElementById("email-export-btn").addEventListener("click", () => {
+    const params = new URLSearchParams({ email_ready: "1" });
+    if (state.clientId) params.set("client_id", state.clientId);
+    window.open(`/api/creators/export?${params.toString()}`, "_blank");
+  });
 }
 
 async function init() {
@@ -2940,6 +3026,7 @@ async function init() {
   await refreshNegotiatorStatus();
   await refreshActionsBadge();
   await refreshWhatsappBadge();
+  await refreshEmailBadge();
   await refreshOpsBadge();
   loadSection(state.section);
 
@@ -2948,6 +3035,7 @@ async function init() {
     refreshNegotiatorStatus();
     refreshActionsBadge();
     refreshWhatsappBadge();
+    refreshEmailBadge();
     refreshOpsBadge();
     // Skip the section re-render while a modal is open or the user is typing /
     // picking in a form control — re-rendering would snap dropdowns shut and

@@ -1054,9 +1054,12 @@ def api_youtube_search():
                 region_code=(payload.get("region_code") or "").strip() or None,
                 relevance_language=(payload.get("relevance_language") or "").strip() or None,
             )
+            # shape_channel keys these on channel_id (there is no "id" field);
+            # fall back to handle so a keyless item can't crash the whole run.
             for c in channels:
-                if c["id"] not in all_channels:
-                    all_channels[c["id"]] = c
+                key = c.get("channel_id") or c.get("handle")
+                if key and key not in all_channels:
+                    all_channels[key] = c
             total_quota += report.get("quota_units", 0)
             all_not_found.extend(report.get("not_found", []))
         except youtube_client.YouTubeError as e:

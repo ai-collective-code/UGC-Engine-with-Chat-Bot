@@ -291,12 +291,12 @@ def _migrate(conn):
     if removed:
         print(f"[local_db] migration: removed {removed} legacy derived whatsapp rows")
 
-    # Add email column if it doesn't exist
-    try:
-        conn.execute("ALTER TABLE creators ADD COLUMN email TEXT")
-        print("[local_db] migration: added email column to creators")
-    except Exception:
-        pass  # column already exists
+    # Add the email column on databases created before it existed. Must be
+    # IF NOT EXISTS: a plain ALTER wrapped in try/except aborts the whole
+    # Postgres transaction when the column is already there, and every
+    # statement after it fails (InFailedSqlTransaction) -- which crashed
+    # startup and made deploys fail while the old version kept running.
+    conn.execute("ALTER TABLE creators ADD COLUMN IF NOT EXISTS email TEXT")
 
     # Backfill source_platform from channel wherever it's still blank.
     conn.execute(

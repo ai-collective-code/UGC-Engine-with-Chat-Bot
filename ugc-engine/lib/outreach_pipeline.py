@@ -29,6 +29,21 @@ def extract_email(text):
     return match.group(0) if match else ""
 
 
+def _to_followers(value):
+    """Audience size as an int, or None when the platform didn't report one.
+
+    None and 0 mean different things here: None is "never measured" (so the
+    reach-tier page must not claim the creator is small), 0 is a real count.
+    Accepts the "12,345" / "12345.0" shapes pandas and sheets produce.
+    """
+    if value is None or value == "":
+        return None
+    try:
+        return int(float(str(value).replace(",", "").strip()))
+    except (TypeError, ValueError):
+        return None
+
+
 # --- Profile type: individual mistri vs. business/shop account -------------
 # Primary classifier is AI (classify_profiles_ai, batched -- one Gemini call
 # per upload/scrape, not per creator). This keyword list is the fallback for
@@ -165,6 +180,9 @@ _FLAT_COLUMNS = {
     "Phone":         ["phone", "whatsapp", "whatsapp number", "whatsapp no", "contact", "contact number", "mobile", "phone number"],
     "Niche":         ["niche", "category", "source hashtag", "topic", "industry", "vertical"],
     "Bio":           ["bio", "caption", "description", "about", "caption sample", "headline", "summary"],
+    "Email":         ["email", "e-mail", "email address", "business email", "mail"],
+    "Followers":     ["followers", "follower count", "followers count", "subscribers",
+                      "subscriber count", "subscribers count", "audience", "fans", "likes"],
 }
 
 
@@ -239,6 +257,8 @@ def load_flat(input_path, cfg):
             "Language Confidence": confidence,
             "Niche": _pick(row_lower, _FLAT_COLUMNS["Niche"]),
             "Phone": phone,
+            "Email": extract_email(_pick(row_lower, _FLAT_COLUMNS["Email"]) or bio),
+            "Followers": _pick(row_lower, _FLAT_COLUMNS["Followers"]),
             "Caption Sample": bio[:120],
         })
 
@@ -431,6 +451,7 @@ def rows_for_db(df, platform):
             "niche": str(r.get("Niche") or ""),
             "phone": phone,
             "email": str(r.get("Email") or ""),
+            "followers": _to_followers(r.get("Followers")),
             "caption_sample": caption,
             "personalized_message": str(r.get("Personalized Message") or ""),
             "channel": platform,
@@ -558,6 +579,7 @@ def apify_reels_to_df(items, cfg):
         location = ""
         niche = ""
         full_name = ""
+        followers = None
         for r in reels:
             cap = str(r.get("caption") or "")
             if not phone:
@@ -572,6 +594,10 @@ def apify_reels_to_df(items, cfg):
                 niche = str(r["hashtags"][0]).lstrip("#")
             if not full_name and r.get("ownerFullName"):
                 full_name = str(r["ownerFullName"]).strip()
+            # The reel scraper usually omits follower counts (only the profile
+            # scraper reports them), so this stays None on most imports.
+            if followers is None and r.get("ownerFollowersCount") is not None:
+                followers = r.get("ownerFollowersCount")
 
         language, matched_state, confidence = (
             resolve_language(location) if location else (None, None, "none")
@@ -589,6 +615,7 @@ def apify_reels_to_df(items, cfg):
             "Language Confidence": confidence,
             "Niche": niche,
             "Phone": phone,
+            "Followers": followers,
             "Caption Sample": best_caption[:120],
         })
 
@@ -691,6 +718,7 @@ def apify_facebook_to_df(items, cfg):
             "Niche": niche,
             "Phone": phone,
             "Email": email,
+            "Followers": it.get("followers") or it.get("likes"),
             "Caption Sample": about[:120],
             "Notes": "",
         })
@@ -768,6 +796,9 @@ def youtube_channels_to_df(channels, cfg):
             "Niche": str(keywords[0]) if keywords else "",
             "Phone": _phone_from(description, phone_re),
             "Email": email,
+            # Channels that hide their count report subscriber_count 0 -- treat
+            # that as unmeasured rather than as a genuine zero-subscriber channel.
+            "Followers": None if ch.get("hidden_subscriber_count") else ch.get("subscriber_count"),
             # Keep far more than the Instagram path's 120 chars: here the
             # description IS the intelligence, not an incidental caption.
             "Caption Sample": description[:600],

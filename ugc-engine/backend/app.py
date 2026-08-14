@@ -472,6 +472,88 @@ def api_email_ready():
     ))
 
 
+# Reach tier for the qualified-leads page: creators with at least this many
+# followers/subscribers. Overridable per request so the same page can show a
+# stricter tier without a code change.
+DEFAULT_MIN_FOLLOWERS = 3000
+
+
+@app.route("/api/creators/measure-audience", methods=["POST"])
+def api_measure_audience():
+    """Fill in follower counts for YouTube creators imported before the count
+    was stored, so historical leads can be tiered by reach.
+
+    YouTube only: it's the one source here that reports audience size for a
+    channel we already know. Handles resolve one per quota unit, so the batch
+    is capped per call and the spend is reported back.
+    """
+    payload = request.get_json(silent=True) or {}
+    client_id = _to_int(payload.get("client_id"), 0) or None
+    limit = _to_int(payload.get("limit"), 200)
+    limit = max(1, min(limit, 500))
+
+    pending = local_db.list_unmeasured_creators(
+        client_id=client_id, source_platform="youtube", limit=limit,
+    )
+    if not pending:
+        return jsonify({"measured": 0, "remaining": 0, "quota_units": 0,
+                        "message": "Every YouTube creator already has an audience count."})
+
+    # profile_link is the channel URL; username is the bare handle. Either
+    # resolves, so prefer the URL and fall back to the handle.
+    refs = {}
+    for row in pending:
+        ref = (row.get("profile_link") or "").strip() or (row.get("username") or "").strip()
+        if ref:
+            refs.setdefault(ref, row["id"])
+
+    try:
+        channels, report = youtube_client.fetch_channels(list(refs.keys()))
+    except youtube_client.YouTubeError as e:
+        return jsonify({"error": str(e)}), 502
+
+    # Match results back by handle, since that's what both sides share.
+    by_handle = {}
+    for ch in channels:
+        handle = (ch.get("handle") or "").strip().lower()
+        if handle:
+            by_handle[handle] = ch
+
+    measured = 0
+    for ref, creator_id in refs.items():
+        handle = ref.rstrip("/").rsplit("/", 1)[-1].lstrip("@").strip().lower()
+        ch = by_handle.get(handle)
+        if not ch or ch.get("hidden_subscriber_count"):
+            continue
+        count = ch.get("subscriber_count")
+        if count is None:
+            continue
+        measured += local_db.set_creator_followers(creator_id, int(count))
+
+    remaining = len(local_db.list_unmeasured_creators(
+        client_id=client_id, source_platform="youtube",
+    ))
+    return jsonify({
+        "measured": measured,
+        "remaining": remaining,
+        "quota_units": report.get("quota_units", 0),
+        "not_found": report.get("not_found", []),
+    })
+
+
+@app.route("/api/qualified-leads", methods=["GET"])
+def api_qualified_leads():
+    """Creators whose audience is at or above the reach threshold (3,000 by
+    default). Only rows with a measured follower count qualify -- a creator
+    whose platform never reported one is absent rather than assumed small."""
+    return jsonify(local_db.list_creators(
+        client_id=request.args.get("client_id", type=int),
+        source_platform=request.args.get("source_platform"),
+        status=request.args.get("status"),
+        min_followers=request.args.get("min_followers", type=int) or DEFAULT_MIN_FOLLOWERS,
+    ))
+
+
 @app.route("/api/platform-breakdown", methods=["GET"])
 def api_platform_breakdown():
     return jsonify(local_db.platform_breakdown(client_id=request.args.get("client_id", type=int)))
@@ -543,12 +625,14 @@ def api_creators_export():
         channel=request.args.get("channel"),
         source_platform=request.args.get("source_platform"),
         email_ready=request.args.get("email_ready") == "1",
+        min_followers=request.args.get("min_followers", type=int),
     )
 
     columns = [
         ("full_name", "Name"),
         ("username", "Username"),
         ("profile_link", "Profile Link"),
+        ("followers", "Followers"),
         ("phone", "Phone"),
         ("email", "Email"),
         ("whatsapp_link", "WhatsApp Link"),

@@ -188,7 +188,7 @@ function switchSection(section) {
   const titles = {
     overview: "Overview", upload: "Upload Data", scrape: "Instagram Scraper", fbscrape: "Facebook Scraper", ytscrape: "YouTube Scraper", analyzer: "Profile Analyzer",
     verify: "Creator Verification", langlab: "Language Lab", translator: "Translator",
-    whatsapp: "WhatsApp Contacts", email: "Email Leads", creators: "Creators", conversations: "Conversations",
+    whatsapp: "WhatsApp Contacts", email: "Email Leads", qualified: "3K+ Leads", creators: "Creators", conversations: "Conversations",
     spinner: "Message Variations",
     ops: "Ops Pipeline", dealers: "Dealers", actions: "Needs Action", clients: "Clients",
     shopfinder: "Shop Finder", shops: "Shop Verify",
@@ -209,6 +209,7 @@ function loadSection(section) {
   if (section === "translator") return loadTranslator();
   if (section === "whatsapp") return loadWhatsapp();
   if (section === "email") return loadEmail();
+  if (section === "qualified") return loadQualified();
   if (section === "creators") return loadCreators();
   if (section === "ops") return loadOpsPipeline();
   if (section === "dealers") return loadDealers();
@@ -1893,6 +1894,135 @@ async function refreshEmailBadge() {
   badgeEl.textContent = rows.length;
 }
 
+// --- Qualified (3K+ audience) leads ─────────────────────────────────────────
+
+const QUALIFIED_DEFAULT_MIN = 3000;
+let qualifiedRows = [];
+
+// The threshold the page is currently showing, clamped to a sane number so a
+// cleared or nonsense input can't ask the server for every creator.
+function qualifiedMin() {
+  const raw = Number(document.getElementById("qualified-min")?.value);
+  return Number.isFinite(raw) && raw >= 0 ? Math.floor(raw) : QUALIFIED_DEFAULT_MIN;
+}
+
+function formatAudience(n) {
+  if (n === null || n === undefined || n === "") return "—";
+  return Number(n).toLocaleString();
+}
+
+async function loadQualified() {
+  const params = new URLSearchParams({ min_followers: qualifiedMin() });
+  if (state.clientId) params.set("client_id", state.clientId);
+  const platform = document.getElementById("qualified-platform-filter").value;
+  const status = document.getElementById("qualified-status-filter").value;
+  if (platform) params.set("source_platform", platform);
+  if (status) params.set("status", status);
+
+  qualifiedRows = await api(`/api/qualified-leads?${params.toString()}`).catch(() => []);
+  // Biggest audience first — the whole point of the page is reach ranking.
+  qualifiedRows.sort((a, b) => (b.followers || 0) - (a.followers || 0));
+  renderQualified();
+}
+
+function renderQualified() {
+  const q = (document.getElementById("qualified-search").value || "").toLowerCase();
+  const rows = qualifiedRows.filter((r) =>
+    !q || `${r.full_name} ${r.username} ${r.niche} ${r.email}`.toLowerCase().includes(q)
+  );
+
+  document.getElementById("qualified-count").textContent =
+    `${rows.length} creator${rows.length === 1 ? "" : "s"} at ${formatAudience(qualifiedMin())}+`;
+  document.getElementById("qualified-empty").hidden = rows.length > 0;
+
+  document.querySelector("#qualified-table tbody").innerHTML = rows.map((r) => `
+    <tr>
+      <td>
+        <div style="font-weight:700">${escapeHtml(r.full_name || "Unknown")} ${profileTypeTag(r)}</div>
+        <div style="font-size:11.5px;color:var(--text-muted)">
+          ${r.profile_link
+            ? `<a href="${escapeHtml(safeUrl(r.profile_link))}" target="_blank" rel="noopener" style="color:inherit">@${escapeHtml(r.username || "")}</a>`
+            : `@${escapeHtml(r.username || "")}`}
+        </div>
+      </td>
+      <td style="text-align:right; font-weight:700; font-variant-numeric:tabular-nums">${formatAudience(r.followers)}</td>
+      <td>${badge(channelLabel(r.source_platform || r.channel), platformBadgeClass(r.source_platform || r.channel))}</td>
+      <td class="muted">${escapeHtml(r.language || "—")}</td>
+      <td class="muted">${escapeHtml(r.niche || "—")}</td>
+      <td class="muted" style="font-variant-numeric:tabular-nums">${escapeHtml(r.phone || "—")}</td>
+      <td class="muted">${r.email
+        ? `<a href="mailto:${escapeHtml(r.email)}" style="color:var(--accent)">${escapeHtml(r.email)}</a>`
+        : "—"}</td>
+      <td>
+        <span class="badge ${STATUS_BADGE_CLASS[r.status] || "badge-neutral"}">
+          <span class="badge-dot"></span>
+          <select class="status-select" data-id="${r.id}" aria-label="Status for ${escapeHtml(r.username || r.full_name || "creator")}">
+            ${STATUS_OPTIONS.map((s) => `<option value="${s}" ${s === r.status ? "selected" : ""}>${s}</option>`).join("")}
+          </select>
+        </span>
+      </td>
+      <td>${r.whatsapp_link
+        ? `<a class="wa-btn" href="${escapeHtml(safeUrl(r.whatsapp_link))}" target="_blank" rel="noopener">🟢 Chat</a>`
+        : (r.email ? `<a class="wa-btn" href="mailto:${escapeHtml(r.email)}">📧 Mail</a>` : '<span class="wa-btn disabled">🟢 Chat</span>')}</td>
+    </tr>
+  `).join("");
+
+  document.querySelectorAll("#qualified-table .status-select").forEach((sel) => {
+    sel.addEventListener("change", async () => {
+      try {
+        await api(`/api/creators/${sel.dataset.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ status: sel.value }),
+        });
+        showToast(`Status updated to "${sel.value}"`, "success");
+      } catch (err) {
+        showToast(err.message || "Request failed", "error");
+      }
+      loadQualified();
+    });
+  });
+}
+
+// Existing creators were imported before audience size was stored, so they
+// have no count and can't be tiered. This re-reads it from YouTube for them.
+async function measureAudience() {
+  const btn = document.getElementById("qualified-measure-btn");
+  const statusEl = document.getElementById("qualified-measure-status");
+  btn.disabled = true;
+  statusEl.textContent = "Looking up subscriber counts…";
+  statusEl.className = "scrape-status";
+  try {
+    const res = await api("/api/creators/measure-audience", {
+      method: "POST",
+      body: JSON.stringify({ client_id: state.clientId || undefined, limit: 200 }),
+    });
+    const parts = [];
+    if (res.measured) parts.push(`Measured ${res.measured} creator(s)`);
+    if (res.remaining) parts.push(`${res.remaining} still unmeasured — click again to continue`);
+    if (res.quota_units) parts.push(`${res.quota_units} quota units used`);
+    statusEl.textContent = parts.join(" · ") || res.message || "Nothing left to measure.";
+    if (res.measured) showToast(`Measured ${res.measured} creator(s)`, "success");
+    await loadQualified();
+    refreshQualifiedBadge();
+  } catch (err) {
+    statusEl.textContent = err.message;
+    statusEl.className = "scrape-status status-error";
+    showToast(err.message, "error");
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function refreshQualifiedBadge() {
+  const params = new URLSearchParams({ min_followers: QUALIFIED_DEFAULT_MIN });
+  if (state.clientId) params.set("client_id", state.clientId);
+  const rows = await api(`/api/qualified-leads?${params.toString()}`).catch(() => []);
+  const badgeEl = document.getElementById("qualified-badge");
+  if (!badgeEl) return;
+  badgeEl.hidden = rows.length === 0;
+  badgeEl.textContent = rows.length;
+}
+
 // --- Clients ────────────────────────────────────────────────────────────────
 
 let _editingClientId = null;
@@ -2989,6 +3119,7 @@ function initFilters() {
     state.clientId = e.target.value;
     refreshWhatsappBadge();
     refreshEmailBadge();
+    refreshQualifiedBadge();
     loadSection(state.section);
   });
   document.getElementById("creator-status-filter").addEventListener("change", loadCreators);
@@ -3003,6 +3134,18 @@ function initFilters() {
   document.getElementById("email-export-btn").addEventListener("click", () => {
     const params = new URLSearchParams({ email_ready: "1" });
     if (state.clientId) params.set("client_id", state.clientId);
+    window.open(`/api/creators/export?${params.toString()}`, "_blank");
+  });
+  document.getElementById("qualified-platform-filter").addEventListener("change", loadQualified);
+  document.getElementById("qualified-status-filter").addEventListener("change", loadQualified);
+  document.getElementById("qualified-min").addEventListener("input", debounce(loadQualified, 400));
+  document.getElementById("qualified-search").addEventListener("input", debounce(renderQualified, 200));
+  document.getElementById("qualified-measure-btn").addEventListener("click", measureAudience);
+  document.getElementById("qualified-export-btn").addEventListener("click", () => {
+    const params = new URLSearchParams({ min_followers: qualifiedMin() });
+    if (state.clientId) params.set("client_id", state.clientId);
+    const platform = document.getElementById("qualified-platform-filter").value;
+    if (platform) params.set("source_platform", platform);
     window.open(`/api/creators/export?${params.toString()}`, "_blank");
   });
 }
@@ -3027,6 +3170,7 @@ async function init() {
   await refreshActionsBadge();
   await refreshWhatsappBadge();
   await refreshEmailBadge();
+  await refreshQualifiedBadge();
   await refreshOpsBadge();
   loadSection(state.section);
 
@@ -3036,6 +3180,7 @@ async function init() {
     refreshActionsBadge();
     refreshWhatsappBadge();
     refreshEmailBadge();
+    refreshQualifiedBadge();
     refreshOpsBadge();
     // Skip the section re-render while a modal is open or the user is typing /
     // picking in a form control — re-rendering would snap dropdowns shut and

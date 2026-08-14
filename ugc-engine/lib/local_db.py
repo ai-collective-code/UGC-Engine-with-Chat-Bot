@@ -70,6 +70,7 @@ CREATE TABLE IF NOT EXISTS creators (
     niche TEXT,
     phone TEXT,
     email TEXT,
+    followers INTEGER,
     caption_sample TEXT,
     personalized_message TEXT,
     channel TEXT,
@@ -173,6 +174,12 @@ def _translate(sql):
     """Rewrite sqlite3-style `?` placeholders to psycopg2's `%s`. None of this
     module's queries contain a literal `%` or `?`, so a plain replace is safe."""
     return sql.replace("?", "%s")
+
+
+# Email pattern for the migration's in-SQL extraction. Deliberately free of
+# `%` and `?` so _translate can't mangle it, and interpolated rather than
+# parameterized because it appears in both SET and WHERE of one statement.
+_EMAIL_SQL_RE = "[A-Za-z0-9._+-]+@[A-Za-z0-9.-]+[.][A-Za-z]{2,}"
 
 
 class _PgConn:
@@ -298,20 +305,27 @@ def _migrate(conn):
     # startup and made deploys fail while the old version kept running.
     conn.execute("ALTER TABLE creators ADD COLUMN IF NOT EXISTS email TEXT")
 
+    # Follower/subscriber counts (YouTube subscribers, Facebook page
+    # followers, or a followers column in an uploaded sheet). Older rows stay
+    # NULL until re-scraped -- the upsert refreshes them on re-import.
+    conn.execute("ALTER TABLE creators ADD COLUMN IF NOT EXISTS followers INTEGER")
+
     # Backfill emails for creators imported before the column existed: old
     # YouTube imports kept "email: a@b.com" in notes, Facebook "Email: a@b.com",
     # and YouTube channel descriptions (caption_sample) often carry one too.
-    # Idempotent: only rows still missing an email are touched, and a row whose
-    # text has an @ but no valid address gets '' so it isn't rescanned forever.
-    # (Regex avoids % and ? so it can't collide with placeholder translation.)
+    #
+    # The WHERE must test the same regex the SET extracts with, not merely
+    # "contains an @". Most descriptions carry a channel URL such as
+    # youtube.com/@handle, which has an @ but no address -- matching on the @
+    # alone rewrote those rows to '' on every single startup and logged a
+    # backfill count that was entirely false. Testing the regex leaves them
+    # untouched, so this runs once per row and the count is real.
     backfilled = conn.execute(
-        "UPDATE creators SET email = COALESCE("
-        " substring(notes from '[A-Za-z0-9._+-]+@[A-Za-z0-9.-]+[.][A-Za-z]{2,}'),"
-        " substring(caption_sample from '[A-Za-z0-9._+-]+@[A-Za-z0-9.-]+[.][A-Za-z]{2,}'),"
-        " '')"
-        " WHERE (email IS NULL OR email = '')"
-        " AND (position('@' in coalesce(notes, '')) > 0"
-        "      OR position('@' in coalesce(caption_sample, '')) > 0)"
+        f"UPDATE creators SET email = COALESCE("
+        f" substring(notes from '{_EMAIL_SQL_RE}'),"
+        f" substring(caption_sample from '{_EMAIL_SQL_RE}'))"
+        f" WHERE (email IS NULL OR email = '')"
+        f" AND (notes ~ '{_EMAIL_SQL_RE}' OR caption_sample ~ '{_EMAIL_SQL_RE}')"
     ).rowcount
     if backfilled:
         print(f"[local_db] migration: backfilled email for {backfilled} creators")
@@ -437,7 +451,8 @@ def upsert_whatsapp_contact(client_id, username, full_name, phone, whatsapp_link
 
 
 def list_creators(client_id=None, status=None, channel=None,
-                  source_platform=None, whatsapp_ready=None, email_ready=None):
+                  source_platform=None, whatsapp_ready=None, email_ready=None,
+                  min_followers=None):
     q = "SELECT * FROM creators WHERE 1=1"
     params = []
     if client_id:
@@ -456,6 +471,10 @@ def list_creators(client_id=None, status=None, channel=None,
         q += " AND phone IS NOT NULL AND phone != ''"
     if email_ready:
         q += " AND email IS NOT NULL AND email != ''"
+    if min_followers:
+        # NULL followers (never measured) are excluded by the comparison.
+        q += " AND followers >= ?"
+        params.append(min_followers)
     q += " ORDER BY id DESC"
     with get_conn() as conn:
         rows = conn.execute(q, params).fetchall()
@@ -507,6 +526,40 @@ def update_creator_status(creator_id, status, notes=None):
             cur = conn.execute("UPDATE creators SET status=?, notes=? WHERE id=?", (status, notes, creator_id))
         else:
             cur = conn.execute("UPDATE creators SET status=? WHERE id=?", (status, creator_id))
+        return cur.rowcount
+
+
+def list_unmeasured_creators(client_id=None, source_platform=None, limit=None):
+    """Creators whose audience size was never recorded, for the measure pass.
+
+    Only rows with something to look them up by are returned -- a row with no
+    username and no profile_link can't be re-fetched from any platform.
+    """
+    q = ("SELECT id, username, profile_link, source_platform FROM creators "
+         "WHERE followers IS NULL "
+         "AND (COALESCE(username, '') != '' OR COALESCE(profile_link, '') != '')")
+    params = []
+    if client_id:
+        q += " AND client_id = ?"
+        params.append(client_id)
+    if source_platform:
+        q += " AND source_platform = ?"
+        params.append(source_platform)
+    q += " ORDER BY id DESC"
+    if limit:
+        q += " LIMIT ?"
+        params.append(int(limit))
+    with get_conn() as conn:
+        rows = conn.execute(q, params).fetchall()
+    return [dict(r) for r in rows]
+
+
+def set_creator_followers(creator_id, followers):
+    """Record a measured audience size. Returns rows updated (0 = no such row)."""
+    with get_conn() as conn:
+        cur = conn.execute(
+            "UPDATE creators SET followers=? WHERE id=?", (followers, creator_id)
+        )
         return cur.rowcount
 
 

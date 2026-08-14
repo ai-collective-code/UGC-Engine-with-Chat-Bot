@@ -55,6 +55,10 @@
           <span class="nav-icon">📧</span> Email Leads
           <span id="email-badge" class="nav-badge nav-badge-violet" hidden>0</span>
         </button>
+        <button class="nav-item" data-section="qualified" id="nav-qualified">
+          <span class="nav-icon">⭐</span> 3K+ Leads
+          <span id="qualified-badge" class="nav-badge" hidden>0</span>
+        </button>
         <button class="nav-item" data-section="conversations" id="nav-conversations">
           <span class="nav-icon">💬</span> Conversations
         </button>
@@ -741,6 +745,58 @@
             <tbody></tbody>
           </table>
           <div class="empty-state" id="email-empty" hidden>No emails captured yet. Scrape YouTube channels or Facebook pages — any business email found is saved here automatically.</div>
+        </div>
+      </section>
+
+      <!-- ═══ QUALIFIED (3K+) LEADS ═══ -->
+      <section id="section-qualified" class="section" hidden>
+        <div class="panel wa-intro">
+          <div class="panel-head" style="margin:0; display:flex; align-items:flex-start; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+            <div>
+              <h2>Qualified leads — 3,000+ audience</h2>
+              <span class="panel-hint">Every creator whose measured audience is at or above the threshold, across all source platforms — sorted biggest first. Creators whose platform never reported a follower count are not listed here; re-scrape them to measure.</span>
+            </div>
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+              <button class="btn btn-small" id="qualified-measure-btn" title="Look up subscriber counts for YouTube creators imported before audience size was recorded">📊 Measure audience</button>
+              <button class="btn btn-small" id="qualified-export-btn">⬇ Export to Excel</button>
+            </div>
+          </div>
+          <div class="scrape-status" id="qualified-measure-status" style="margin-top:10px"></div>
+        </div>
+        <div class="toolbar">
+          <label class="scrape-limit-label" style="flex-direction:row; align-items:center; gap:6px;">
+            Min audience
+            <input type="number" id="qualified-min" value="3000" min="0" step="500" style="width:100px">
+          </label>
+          <select id="qualified-platform-filter" aria-label="Filter by source platform">
+            <option value="">All sources</option>
+            <option value="instagram">Instagram</option>
+            <option value="facebook">Facebook</option>
+            <option value="youtube">YouTube</option>
+            <option value="linkedin">LinkedIn</option>
+          </select>
+          <select id="qualified-status-filter" aria-label="Filter by status">
+            <option value="">All statuses</option>
+            <option>Not Sent</option>
+            <option>Sent</option>
+            <option>Replied</option>
+            <option>Converted</option>
+            <option>Not Interested</option>
+          </select>
+          <input type="text" id="qualified-search" class="toolbar-search" placeholder="Search name, niche, email…" aria-label="Search qualified leads">
+          <span class="toolbar-count" id="qualified-count"></span>
+        </div>
+        <div class="table-wrap">
+          <table id="qualified-table">
+            <thead>
+              <tr>
+                <th>Creator</th><th style="text-align:right">Audience</th><th>Source</th>
+                <th>Language</th><th>Niche</th><th>Phone</th><th>Email</th><th>Status</th><th>Reach out</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+          <div class="empty-state" id="qualified-empty" hidden>No creators at this audience size yet. YouTube searches report subscriber counts, so scrape channels and any with 3,000+ subscribers will appear here.</div>
         </div>
       </section>
 

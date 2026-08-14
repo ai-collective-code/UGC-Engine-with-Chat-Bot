@@ -1033,29 +1033,50 @@ def api_youtube_search():
     if error:
         return error
 
-    query = str(payload.get("query") or "").strip()
-    if not query:
+    query_text = str(payload.get("query") or "").strip()
+    if not query_text:
         return jsonify({"error": "Enter a search term (e.g. 'tiles fitting mistri')."}), 400
 
-    try:
-        channels, report = youtube_client.search_channels(
-            query,
-            limit=payload.get("limit") or 10,
-            region_code=(payload.get("region_code") or "").strip() or None,
-            relevance_language=(payload.get("relevance_language") or "").strip() or None,
-        )
-    except youtube_client.YouTubeError as e:
-        return jsonify({"error": str(e)}), 502
+    queries = [q.strip() for q in query_text.split("\n") if q.strip()]
+    if len(queries) > 50:
+        return jsonify({"error": f"You entered {len(queries)} search terms. To conserve the 10,000 unit daily quota, please run at most 50 searches at a time."}), 400
 
-    result = {"channels": channels, "query": query, **report}
+    all_channels = {}
+    total_quota = 0
+    all_not_found = []
+    first_error = None
+
+    for q in queries:
+        try:
+            channels, report = youtube_client.search_channels(
+                q,
+                limit=payload.get("limit") or 10,
+                region_code=(payload.get("region_code") or "").strip() or None,
+                relevance_language=(payload.get("relevance_language") or "").strip() or None,
+            )
+            for c in channels:
+                if c["id"] not in all_channels:
+                    all_channels[c["id"]] = c
+            total_quota += report.get("quota_units", 0)
+            all_not_found.extend(report.get("not_found", []))
+        except youtube_client.YouTubeError as e:
+            if not first_error:
+                first_error = str(e)
+
+    if not all_channels and first_error:
+        return jsonify({"error": first_error}), 502
+
+    channels_list = list(all_channels.values())
+    result = {"channels": channels_list, "query": query_text, "quota_units": total_quota, "not_found": all_not_found}
+
     if not payload.get("import"):
         return jsonify({**result, "imported": None})
 
     try:
-        result["imported"] = outreach_pipeline.store_youtube_channels(cfg, client_id, channels)
+        result["imported"] = outreach_pipeline.store_youtube_channels(cfg, client_id, channels_list)
     except Exception as e:
         import traceback; traceback.print_exc()
-        return jsonify({**result, "error": f"Found {len(channels)} channels but the import failed: {e}"}), 502
+        return jsonify({**result, "error": f"Found {len(channels_list)} channels but the import failed: {e}"}), 502
     return jsonify(result)
 
 

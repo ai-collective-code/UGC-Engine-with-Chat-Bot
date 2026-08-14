@@ -1342,9 +1342,13 @@ async function searchYtChannels() {
   const query = document.getElementById("yt-query").value.trim();
   if (!query) return setYtStatus("yt-search-status", "Enter a search term.", "error");
 
+  const queries = query.split("\n").map(q => q.trim()).filter(Boolean);
+  const cost = queries.length * 100;
+  const querySummary = queries.length > 1 ? `${queries.length} searches` : `"${query}"`;
+
   const btn = document.getElementById("yt-search-btn");
   btn.disabled = true;
-  setYtStatus("yt-search-status", `Searching for "${query}"… (costs 100 quota units)`);
+  setYtStatus("yt-search-status", `Searching for ${querySummary}… (costs ${cost} quota units)`);
   try {
     const res = await api("/api/youtube/search", {
       method: "POST",

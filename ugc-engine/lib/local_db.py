@@ -452,9 +452,12 @@ def upsert_whatsapp_contact(client_id, username, full_name, phone, whatsapp_link
 
 def list_creators(client_id=None, status=None, channel=None,
                   source_platform=None, whatsapp_ready=None, email_ready=None,
-                  min_followers=None):
+                  min_followers=None, creator_id=None):
     q = "SELECT * FROM creators WHERE 1=1"
     params = []
+    if creator_id:
+        q += " AND id = ?"
+        params.append(creator_id)
     if client_id:
         q += " AND client_id = ?"
         params.append(client_id)

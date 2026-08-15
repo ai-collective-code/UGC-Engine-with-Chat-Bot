@@ -627,6 +627,7 @@ def api_creators_export():
         email_ready=request.args.get("email_ready") == "1",
         whatsapp_ready=request.args.get("whatsapp_ready") == "1",
         min_followers=request.args.get("min_followers", type=int),
+        creator_id=request.args.get("creator_id", type=int),
     )
 
     columns = [
@@ -676,10 +677,16 @@ def api_creators_export():
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)
+
+    filename = "creators_export.xlsx"
+    if request.args.get("creator_id", type=int) and len(rows) == 1:
+        safe_name = re.sub(r"[^A-Za-z0-9_-]+", "_", rows[0].get("username") or rows[0].get("full_name") or "creator").strip("_")
+        filename = f"{safe_name or 'creator'}.xlsx"
+
     return Response(
         buf.getvalue(),
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": "attachment; filename=creators_export.xlsx"},
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
 
 

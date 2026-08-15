@@ -877,6 +877,19 @@ td a {
 td a:hover { color: var(--accent-cyan); text-decoration: underline; }
 td.muted { color: var(--text-muted); }
 
+/* Pins the row-actions column to the right edge of the scroll container so it
+   stays reachable without scrolling past every other column on wide tables. */
+.col-sticky-actions {
+  position: sticky;
+  right: 0;
+  z-index: 1;
+  box-shadow: -8px 0 12px -8px rgba(0, 0, 0, 0.4);
+}
+thead th.col-sticky-actions { background: rgba(11, 17, 33, 0.95); }
+tbody td.col-sticky-actions { background: var(--bg-card-solid); }
+tbody tr:hover td.col-sticky-actions { background: #142038; }
+.row-actions { display: flex; gap: 6px; flex-wrap: nowrap; }
+
 /* ── Badges ──────────────────────────────────────── */
 .badge {
   display: inline-flex;

@@ -1864,7 +1864,12 @@ function renderEmail() {
           </select>
         </span>
       </td>
-      <td><a class="wa-btn" href="mailto:${escapeHtml(r.email || "")}">📧 Mail</a></td>
+      <td class="col-sticky-actions">
+        <div class="row-actions">
+          <a class="wa-btn" href="mailto:${escapeHtml(r.email || "")}">📧 Mail</a>
+          <a class="wa-btn" href="/api/creators/export?creator_id=${r.id}" title="Download this creator as .xlsx">⬇ Download</a>
+        </div>
+      </td>
     </tr>
   `).join("");
 
@@ -3143,6 +3148,10 @@ function initFilters() {
   document.getElementById("email-export-btn").addEventListener("click", () => {
     const params = new URLSearchParams({ email_ready: "1" });
     if (state.clientId) params.set("client_id", state.clientId);
+    const platform = document.getElementById("email-platform-filter").value;
+    const status = document.getElementById("email-status-filter").value;
+    if (platform) params.set("source_platform", platform);
+    if (status) params.set("status", status);
     window.open(`/api/creators/export?${params.toString()}`, "_blank");
   });
   document.getElementById("qualified-platform-filter").addEventListener("change", loadQualified);

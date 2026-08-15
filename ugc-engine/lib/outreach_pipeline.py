@@ -826,7 +826,7 @@ def store_youtube_channels(cfg, client_id, channels):
     return {
         "total": len(rows),
         "whatsapp_ready": sum(1 for r in rows if r["phone"]),
-        "with_email": sum(1 for r in rows if r["notes"]),
+        "with_email": sum(1 for r in rows if r["email"]),
     }
 
 

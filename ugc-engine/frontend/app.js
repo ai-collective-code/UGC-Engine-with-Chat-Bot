@@ -3128,6 +3128,15 @@ function initFilters() {
   document.getElementById("wa-platform-filter").addEventListener("change", loadWhatsapp);
   document.getElementById("wa-status-filter").addEventListener("change", loadWhatsapp);
   document.getElementById("wa-search").addEventListener("input", debounce(renderWhatsapp, 200));
+  document.getElementById("wa-export-btn").addEventListener("click", () => {
+    const params = new URLSearchParams({ whatsapp_ready: "1" });
+    if (state.clientId) params.set("client_id", state.clientId);
+    const platform = document.getElementById("wa-platform-filter").value;
+    const status = document.getElementById("wa-status-filter").value;
+    if (platform) params.set("source_platform", platform);
+    if (status) params.set("status", status);
+    window.open(`/api/creators/export?${params.toString()}`, "_blank");
+  });
   document.getElementById("email-platform-filter").addEventListener("change", loadEmail);
   document.getElementById("email-status-filter").addEventListener("change", loadEmail);
   document.getElementById("email-search").addEventListener("input", debounce(renderEmail, 200));

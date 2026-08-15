@@ -625,6 +625,7 @@ def api_creators_export():
         channel=request.args.get("channel"),
         source_platform=request.args.get("source_platform"),
         email_ready=request.args.get("email_ready") == "1",
+        whatsapp_ready=request.args.get("whatsapp_ready") == "1",
         min_followers=request.args.get("min_followers", type=int),
     )
 
